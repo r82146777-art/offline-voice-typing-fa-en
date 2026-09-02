@@ -3,7 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # امکان اجرای دستی
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,33 +26,43 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Create Flutter project structure if needed
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --org com.offlinevoicetyping --project-name offline_voice_typing .
+          fi
+
       - name: Get dependencies
         run: flutter pub get
-
-      - name: Check Flutter
-        run: flutter doctor -v
 
       - name: Build APK
         run: flutter build apk --release
 
-      - name: Upload APK artifact
+      - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: offline-voice-typing-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
 
-      - name: Create Release (only on main)
-        if: github.ref == 'refs/heads/main'
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        if: success()
         with:
-          tag_name: v0.1.1
-          name: Offline Voice Typing v0.1.1
+          tag_name: v0.1.${{ github.run_number }}
+          name: Offline Voice Typing v0.1.${{ github.run_number }}
           body: |
-            اولین نسخه قابل نصب
-            - دانلود خودکار مدل‌های فارسی و انگلیسی
-            - رابط کاربری دسترسی‌پذیر
-            - پشتیبانی فارسی و انگلیسی
+            نسخه ساخته‌شده با GitHub Actions
+
+            ### ویژگی‌ها:
+            - دانلود خودکار مدل‌های Vosk (فارسی + انگلیسی)
+            - رابط کاربری دسترسی‌پذیر برای نابینایان و افراد بینا
+            - سوئیچ زبان فارسی / انگلیسی
+            - کاملاً آفلاین بعد از دانلود اولیه مدل‌ها
+
+            **توجه:** تشخیص گفتار واقعی هنوز به موتور Vosk وصل نشده و فعلاً متن نمونه نمایش می‌دهد. بعد از تست بازخورد بدهید تا کامل شود.
           files: build/app/outputs/flutter-apk/app-release.apk
+          draft: false
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
