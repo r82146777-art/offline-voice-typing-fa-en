@@ -21,7 +21,7 @@ class BigMicButton extends StatelessWidget {
       enabled: enabled,
       label: isListening ? 'توقف ضبط صدا' : 'شروع ضبط صدا',
       hint: isListening
-          ? 'برای توقف و تبدیل صدا به متن دوبار ضربه بزنید'
+          ? 'برای توقف و درج متن دوبار ضربه بزنید'
           : 'برای شروع صحبت کردن دوبار ضربه بزنید',
       child: Material(
         color: Colors.transparent,

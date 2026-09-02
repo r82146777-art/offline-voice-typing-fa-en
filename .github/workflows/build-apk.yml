@@ -39,19 +39,15 @@ jobs:
       - name: Download Vosk models into assets
         run: |
           mkdir -p assets/models
-          echo "Downloading Persian model..."
           curl -L --retry 5 --retry-delay 3 -o assets/models/vosk-model-small-fa-0.42.zip \
             "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip"
-          echo "Downloading English model..."
           curl -L --retry 5 --retry-delay 3 -o assets/models/vosk-model-small-en-us-0.15.zip \
             "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip"
           ls -lh assets/models/
-          # بررسی حجم فایل‌ها
           FA_SIZE=$(stat -c%s assets/models/vosk-model-small-fa-0.42.zip)
           EN_SIZE=$(stat -c%s assets/models/vosk-model-small-en-us-0.15.zip)
-          echo "FA size: $FA_SIZE  EN size: $EN_SIZE"
           if [ "$FA_SIZE" -lt 10000000 ] || [ "$EN_SIZE" -lt 10000000 ]; then
-            echo "Model files are too small - download probably failed"
+            echo "Model files too small"
             exit 1
           fi
 

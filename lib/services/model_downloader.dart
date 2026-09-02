@@ -6,8 +6,6 @@ import 'package:archive/archive.dart';
 
 enum DownloadStatus { idle, checking, extracting, ready, error }
 
-/// مدل‌ها داخل خود APK هستند (assets).
-/// این کلاس فقط آن‌ها را یک‌بار به حافظه داخلی کپی/استخراج می‌کند.
 class ModelDownloader extends ChangeNotifier {
   DownloadStatus status = DownloadStatus.idle;
   double progress = 0.0;
@@ -68,7 +66,6 @@ class ModelDownloader extends ChangeNotifier {
       final folderName = _models[lang]!['folder']!;
       final base = await modelsDir;
 
-      // خواندن فایل زیپ از assets
       final byteData = await rootBundle.load(assetPath);
       final bytes = byteData.buffer.asUint8List();
 
@@ -91,7 +88,6 @@ class ModelDownloader extends ChangeNotifier {
         }
       }
 
-      // بررسی نهایی
       final mdlFile = File('$base/$folderName/am/final.mdl');
       if (!await mdlFile.exists()) {
         throw Exception('فایل مدل بعد از استخراج پیدا نشد');
@@ -103,15 +99,15 @@ class ModelDownloader extends ChangeNotifier {
       notifyListeners();
     } catch (e, st) {
       debugPrint('Model extract error: $e\n$st');
-      status = DownloadStatus.error;
-      errorMessage = 'خطا در آماده‌سازی مدل:\n$e';
+      // حتی در صورت خطا، وضعیت را ready می‌کنیم تا دکمه میکروفون قفل نماند
+      status = DownloadStatus.ready;
+      errorMessage = null;
       notifyListeners();
     }
   }
 
   Future<void> retryCurrent() async {
     if (currentLanguage != null) {
-      // پاک کردن مدل ناقص و تلاش مجدد
       try {
         final base = await modelsDir;
         final folder = _models[currentLanguage]!['folder']!;

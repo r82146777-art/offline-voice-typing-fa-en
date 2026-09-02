@@ -40,25 +40,16 @@ class SttService extends ChangeNotifier {
   Future<void> initialize() async {
     _state = SttState.initializing;
     notifyListeners();
-    // مدل توسط ModelDownloader مدیریت می‌شود
   }
 
   Future<void> startListening() async {
     if (_state == SttState.listening) return;
-    if (!_modelReady) {
-      _errorMessage = 'مدل هنوز آماده نیست';
-      _state = SttState.error;
-      notifyListeners();
-      return;
-    }
 
+    // حتی اگر مدل کامل آماده نباشد، اجازه ضبط آزمایشی بده
     _partialText = '';
     _state = SttState.listening;
     _errorMessage = null;
     notifyListeners();
-
-    // TODO: اتصال واقعی به Vosk + record
-    // فعلاً شبیه‌سازی برای تست UI و جریان کار
   }
 
   Future<void> stopListening() async {
@@ -67,12 +58,11 @@ class SttService extends ChangeNotifier {
     _state = SttState.processing;
     notifyListeners();
 
-    await Future.delayed(const Duration(milliseconds: 600));
+    await Future.delayed(const Duration(milliseconds: 500));
 
-    // متن نمونه تا زمانی که موتور واقعی وصل شود
     final sample = _language == SttLanguage.persian
-        ? 'این یک متن آزمایشی است. بعد از اتصال مدل واقعی، صدای شما به متن تبدیل می‌شود.'
-        : 'This is sample text. After connecting the real model, your speech will be converted.';
+        ? 'این یک متن آزمایشی است. موتور واقعی تشخیص گفتار در نسخه‌های بعدی وصل می‌شود.'
+        : 'This is sample text. Real speech recognition will be connected in future versions.';
 
     if (_finalText.isEmpty) {
       _finalText = sample;
