@@ -12,20 +12,21 @@ class ModelDownloader extends ChangeNotifier {
   String? errorMessage;
   String? currentLanguage;
 
-  // چند آدرس مختلف برای هر مدل (در صورت قطع بودن یکی، بعدی امتحان می‌شود)
+  // آدرس‌های جایگزین (Hugging Face معمولاً در ایران بهتر باز می‌شود)
   static const _models = {
     'fa': {
       'folder': 'vosk-model-small-fa-0.42',
       'urls': [
+        'https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip',
         'https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip',
-        'https://github.com/alphacep/vosk-api/releases/download/0.3.42/vosk-model-small-fa-0.42.zip',
       ],
     },
     'en': {
       'folder': 'vosk-model-small-en-us-0.15',
       'urls': [
+        'https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip',
+        'https://huggingface.co/grimso/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip',
         'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip',
-        'https://github.com/alphacep/vosk-api/releases/download/0.3.42/vosk-model-small-en-us-0.15.zip',
       ],
     },
   };
@@ -73,6 +74,7 @@ class ModelDownloader extends ChangeNotifier {
 
     for (final url in urls) {
       try {
+        debugPrint('Trying download from: $url');
         await _downloadAndExtract(lang, url);
         status = DownloadStatus.ready;
         progress = 1.0;
@@ -88,8 +90,11 @@ class ModelDownloader extends ChangeNotifier {
     status = DownloadStatus.error;
     errorMessage =
         'نتوانست مدل را دانلود کند.\n\n' +
-        'لطفاً اتصال اینترنت را چک کنید یا VPN روشن کنید و دوباره امتحان کنید.\n\n' +
-        'جزئیات: ${lastError?.toString() ?? "خطای ناشناخته"}';
+        'لطفاً:\n' +
+        '۱. اتصال اینترنت را چک کنید\n' +
+        '۲. اگر لازم است VPN روشن کنید\n' +
+        '۳. دکمه تلاش مجدد را بزنید\n\n' +
+        'جزئیات فنی: ${lastError?.toString() ?? "خطای ناشناخته"}';
     notifyListeners();
   }
 
@@ -100,8 +105,11 @@ class ModelDownloader extends ChangeNotifier {
     final client = http.Client();
     try {
       final request = http.Request('GET', Uri.parse(url));
+      // برخی سرورها نیاز به User-Agent دارند
+      request.headers['User-Agent'] = 'OfflineVoiceTyping/1.0 (Android)';
+
       final response = await client.send(request).timeout(
-            const Duration(seconds: 90),
+            const Duration(seconds: 120),
           );
 
       if (response.statusCode != 200) {
