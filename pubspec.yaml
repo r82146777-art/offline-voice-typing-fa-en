@@ -1,7 +1,7 @@
 name: offline_voice_typing
 description: Offline voice typing for Persian and English with strong accessibility.
 publish_to: 'none'
-version: 0.3.0+5
+version: 0.4.0+6
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -18,6 +18,7 @@ dependencies:
   flutter_animate: ^4.5.0
   shared_preferences: ^2.3.2
   url_launcher: ^6.3.0
+  vosk_flutter: ^0.3.48
 
 dev_dependencies:
   flutter_test:

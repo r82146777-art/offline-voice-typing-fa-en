@@ -36,6 +36,16 @@ jobs:
           cp /tmp/backup/pubspec.yaml .
           cp /tmp/backup/README.md . 2>/dev/null || true
 
+      - name: Add Android permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
+            sed -i 's|<manifest |<manifest |' "$MANIFEST"
+            # اضافه کردن مجوزها قبل از <application
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          fi
+          cat "$MANIFEST"
+
       - name: Download Vosk models into assets
         run: |
           mkdir -p assets/models

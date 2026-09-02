@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:android_intent_plus/android_intent.dart';
 
 import '../services/stt_service.dart';
 import '../services/model_downloader.dart';
@@ -20,8 +21,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _textController = TextEditingController();
-  bool _permissionGranted = false;
   bool _dontShowInviteAgain = false;
+  bool _bootstrapping = true;
 
   @override
   void initState() {
@@ -33,17 +34,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _bootstrap() async {
-    final status = await Permission.microphone.request();
-    _permissionGranted = status.isGranted;
-
     final downloader = context.read<ModelDownloader>();
     final stt = context.read<SttService>();
+    stt.attachDownloader(downloader);
 
-    // مدل را آماده کن ولی حتی اگر شکست خورد دکمه را قفل نکن
-    await downloader.ensureModel(stt.langCode);
-    stt.setModelReady(true);
+    // درخواست مجوز میکروفون
+    await Permission.microphone.request();
 
-    if (mounted) setState(() {});
+    // آماده‌سازی مدل در پس‌زمینه
+    try {
+      await downloader.ensureModel(stt.langCode);
+      await stt.ensureEngineReady();
+    } catch (e) {
+      debugPrint('Bootstrap STT: $e');
+    }
+
+    if (mounted) {
+      setState(() => _bootstrapping = false);
+    }
   }
 
   Future<void> _maybeShowInviteDialog() async {
@@ -151,10 +159,65 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
 
-    if (selected != null) {
+    if (selected != null && selected != stt.language) {
       stt.setLanguage(selected);
+      setState(() => _bootstrapping = true);
       await downloader.ensureModel(selected == SttLanguage.persian ? 'fa' : 'en');
-      stt.setModelReady(true);
+      await stt.ensureEngineReady();
+      if (mounted) setState(() => _bootstrapping = false);
+    }
+  }
+
+  Future<void> _openVoiceInputSettings() async {
+    try {
+      // باز کردن تنظیمات روش‌های ورودی / کیبورد
+      const intent = AndroidIntent(
+        action: 'android.settings.INPUT_METHOD_SETTINGS',
+      );
+      await intent.launch();
+    } catch (_) {
+      try {
+        const intent = AndroidIntent(
+          action: 'android.settings.VOICE_INPUT_SETTINGS',
+        );
+        await intent.launch();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('نتوانست تنظیمات را باز کند: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _onMicPressed() async {
+    final stt = context.read<SttService>();
+
+    // همیشه اول مجوز را چک/درخواست کن
+    var status = await Permission.microphone.status;
+    if (!status.isGranted) {
+      status = await Permission.microphone.request();
+    }
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('برای ضبط صدا باید مجوز میکروفون را بدهید'),
+            action: SnackBarAction(
+              label: 'تنظیمات',
+              onPressed: openAppSettings,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (stt.isListening) {
+      await stt.stopListening();
+    } else {
+      await stt.startListening();
     }
   }
 
@@ -171,14 +234,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    if (stt.finalText.isNotEmpty && _textController.text != stt.finalText) {
-      _textController.text = stt.finalText;
+    // همگام‌سازی متن نهایی + جزئی
+    final displayText = stt.finalText +
+        (stt.partialText.isNotEmpty
+            ? (stt.finalText.isEmpty ? stt.partialText : ' ${stt.partialText}')
+            : '');
+
+    if (_textController.text != displayText) {
+      _textController.text = displayText;
       _textController.selection = TextSelection.fromPosition(
         TextPosition(offset: _textController.text.length),
       );
     }
 
-    final isPreparing = downloader.status == DownloadStatus.extracting;
+    final isPreparing =
+        _bootstrapping || downloader.status == DownloadStatus.extracting;
 
     return Scaffold(
       appBar: AppBar(
@@ -198,6 +268,8 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelected: (value) async {
               if (value == 'language') {
                 await _showLanguagePicker();
+              } else if (value == 'voice_input') {
+                await _openVoiceInputSettings();
               } else if (value == 'help') {
                 Navigator.push(
                   context,
@@ -212,6 +284,10 @@ class _HomeScreenState extends State<HomeScreen> {
             },
             itemBuilder: (context) => const [
               PopupMenuItem(value: 'language', child: Text('زبان')),
+              PopupMenuItem(
+                value: 'voice_input',
+                child: Text('تنظیمات تایپ صوتی سیستم'),
+              ),
               PopupMenuItem(value: 'help', child: Text('راهنما')),
               PopupMenuItem(value: 'about', child: Text('درباره ما')),
             ],
@@ -223,17 +299,19 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           child: Column(
             children: [
-              // وضعیت زبان فعلی
               Semantics(
-                label: 'زبان فعلی: ${stt.language == SttLanguage.persian ? "فارسی" : "انگلیسی"}',
+                label:
+                    'زبان فعلی: ${stt.language == SttLanguage.persian ? "فارسی" : "انگلیسی"}',
                 child: InkWell(
                   onTap: _showLanguagePicker,
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                      color:
+                          colorScheme.surfaceContainerHighest.withOpacity(0.5),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -242,7 +320,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            stt.language == SttLanguage.persian ? 'زبان: فارسی' : 'Language: English',
+                            stt.language == SttLanguage.persian
+                                ? 'زبان: فارسی'
+                                : 'Language: English',
                             style: theme.textTheme.titleMedium,
                           ),
                         ),
@@ -258,20 +338,38 @@ class _HomeScreenState extends State<HomeScreen> {
               if (isPreparing) ...[
                 const LinearProgressIndicator(),
                 const SizedBox(height: 8),
-                const Text('در حال آماده‌سازی مدل آفلاین...'),
+                const Text('در حال آماده‌سازی موتور تشخیص گفتار...'),
                 const SizedBox(height: 12),
               ],
 
-              // ناحیه متن
+              if (stt.state == SttState.error && stt.errorMessage != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: colorScheme.errorContainer.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    stt.errorMessage!,
+                    style: TextStyle(color: colorScheme.onErrorContainer),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+
               Expanded(
                 child: Semantics(
-                  label: 'جعبه متن. متن تایپ‌شده یا تشخیص‌داده‌شده اینجا نمایش داده می‌شود',
+                  label:
+                      'جعبه متن. متن تشخیص‌داده‌شده اینجا نمایش داده می‌شود',
                   textField: true,
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest.withOpacity(0.45),
+                      color:
+                          colorScheme.surfaceContainerHighest.withOpacity(0.45),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: colorScheme.outline.withOpacity(0.25),
@@ -289,8 +387,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       decoration: InputDecoration(
                         border: InputBorder.none,
                         hintText: stt.language == SttLanguage.persian
-                            ? 'متن اینجا ظاهر می‌شود...\nدکمه میکروفون را فشار دهید و صحبت کنید'
-                            : 'Text will appear here...\nPress the microphone and speak',
+                            ? 'متن اینجا ظاهر می‌شود...\nدکمه میکروفون را بزنید و صحبت کنید'
+                            : 'Text will appear here...\nPress mic and speak',
                         hintStyle: theme.textTheme.bodyLarge?.copyWith(
                           color: colorScheme.onSurface.withOpacity(0.4),
                         ),
@@ -305,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Semantics(
                 liveRegion: true,
                 child: Text(
-                  _statusText(stt, downloader),
+                  _statusText(stt, isPreparing),
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.w600,
@@ -316,37 +414,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 16),
 
+              // دکمه همیشه فعال است — مجوز هنگام فشار درخواست می‌شود
               BigMicButton(
                 isListening: stt.isListening,
-                // دکمه همیشه فعال است (مگر در حال آماده‌سازی کوتاه)
-                enabled: !isPreparing && _permissionGranted,
-                onPressed: () async {
-                  if (!_permissionGranted) {
-                    final status = await Permission.microphone.request();
-                    setState(() => _permissionGranted = status.isGranted);
-                    if (!_permissionGranted) return;
-                  }
-                  if (stt.isListening) {
-                    await stt.stopListening();
-                  } else {
-                    await stt.startListening();
-                  }
-                },
+                enabled: true,
+                onPressed: _onMicPressed,
               ).animate().scale(duration: 350.ms, curve: Curves.easeOutBack),
 
               const SizedBox(height: 20),
 
-              Semantics(
-                label: 'راهنمای کوتاه',
-                child: Text(
-                  stt.language == SttLanguage.persian
-                      ? 'دکمه میکروفون را بزنید، صحبت کنید، دوباره بزنید تا متن درج شود.'
-                      : 'Tap the mic, speak, tap again to insert text.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurface.withOpacity(0.7),
-                  ),
-                  textAlign: TextAlign.center,
+              Text(
+                stt.language == SttLanguage.persian
+                    ? 'دکمه را بزنید، صحبت کنید، دوباره بزنید تا متن ثبت شود.'
+                    : 'Tap mic, speak, tap again to commit text.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurface.withOpacity(0.7),
                 ),
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
             ],
@@ -356,15 +440,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  String _statusText(SttService stt, ModelDownloader downloader) {
-    if (downloader.status == DownloadStatus.extracting) {
-      return 'در حال آماده‌سازی مدل...';
-    }
+  String _statusText(SttService stt, bool isPreparing) {
+    if (isPreparing) return 'در حال آماده‌سازی...';
     switch (stt.state) {
       case SttState.idle:
-        return stt.language == SttLanguage.persian ? 'آماده' : 'Ready';
+        return stt.language == SttLanguage.persian
+            ? 'آماده — صحبت کنید'
+            : 'Ready — speak';
       case SttState.initializing:
-        return 'در حال آماده‌سازی...';
+        return 'در حال آماده‌سازی موتور...';
       case SttState.listening:
         return stt.language == SttLanguage.persian
             ? 'در حال گوش دادن...'
@@ -374,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ? 'در حال پردازش...'
             : 'Processing...';
       case SttState.error:
-        return stt.errorMessage ?? 'خطا';
+        return 'خطا — دوباره تلاش کنید';
     }
   }
 }
