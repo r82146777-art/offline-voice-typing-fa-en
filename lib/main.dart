@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'screens/home_screen.dart';
 import 'services/stt_service.dart';
 import 'services/tts_service.dart';
+import 'services/model_downloader.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,7 @@ class OfflineVoiceTypingApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ModelDownloader()),
         ChangeNotifierProvider(create: (_) => SttService()),
         Provider(create: (_) => TtsService()),
       ],
@@ -37,8 +39,6 @@ class OfflineVoiceTypingApp extends StatelessWidget {
             brightness: Brightness.light,
           ),
           textTheme: GoogleFonts.vazirmatnTextTheme(),
-          // دسترسی‌پذیری بهتر
-          visualDensity: VisualDensity.adaptivePlatformDensity,
         ),
         darkTheme: ThemeData(
           useMaterial3: true,

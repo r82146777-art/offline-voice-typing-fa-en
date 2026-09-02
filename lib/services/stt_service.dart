@@ -1,12 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-/// سرویس تشخیص گفتار آفلاین
-///
-/// وضعیت فعلی: اسکلت کامل + شبیه‌سازی
-/// برای فعال‌سازی واقعی:
-/// 1. مدل‌های Vosk را در assets/models/fa و assets/models/en قرار دهید
-/// 2. پلاگین vosk_flutter را به درستی پیکربندی کنید
-/// 3. کد TODOها را با پیاده‌سازی واقعی جایگزین کنید
 enum SttLanguage { persian, english }
 
 enum SttState { idle, initializing, listening, processing, error }
@@ -27,47 +20,45 @@ class SttService extends ChangeNotifier {
   bool get isListening => _state == SttState.listening;
   bool get modelReady => _modelReady;
 
+  String get langCode => _language == SttLanguage.persian ? 'fa' : 'en';
+
   void setLanguage(SttLanguage lang) {
     if (_language != lang) {
       _language = lang;
-      // در نسخه واقعی مدل جدید بارگذاری می‌شود
       notifyListeners();
     }
+  }
+
+  void setModelReady(bool ready) {
+    _modelReady = ready;
+    if (ready && _state == SttState.initializing) {
+      _state = SttState.idle;
+    }
+    notifyListeners();
   }
 
   Future<void> initialize() async {
     _state = SttState.initializing;
     notifyListeners();
-
-    try {
-      // TODO: بارگذاری واقعی مدل
-      // final modelDir = await _resolveModelPath(_language);
-      // ...
-      await Future.delayed(const Duration(milliseconds: 900));
-      _modelReady = true;
-      _state = SttState.idle;
-      _errorMessage = null;
-    } catch (e, st) {
-      debugPrint('STT init error: $e\n$st');
-      _state = SttState.error;
-      _errorMessage = 'خطا در آماده‌سازی مدل. مدل‌ها را دانلود کرده‌اید؟';
-      _modelReady = false;
-    }
-    notifyListeners();
+    // مدل توسط ModelDownloader مدیریت می‌شود
   }
 
   Future<void> startListening() async {
     if (_state == SttState.listening) return;
     if (!_modelReady) {
-      await initialize();
-      if (!_modelReady) return;
+      _errorMessage = 'مدل هنوز آماده نیست';
+      _state = SttState.error;
+      notifyListeners();
+      return;
     }
 
     _partialText = '';
     _state = SttState.listening;
+    _errorMessage = null;
     notifyListeners();
 
-    // TODO: شروع ضبط واقعی با پکیج record و ارسال به Vosk
+    // TODO: اتصال واقعی به Vosk + record
+    // فعلاً شبیه‌سازی برای تست UI و جریان کار
   }
 
   Future<void> stopListening() async {
@@ -76,17 +67,17 @@ class SttService extends ChangeNotifier {
     _state = SttState.processing;
     notifyListeners();
 
-    // شبیه‌سازی نتیجه (جایگزین با نتیجه واقعی Vosk شود)
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future.delayed(const Duration(milliseconds: 600));
 
+    // متن نمونه تا زمانی که موتور واقعی وصل شود
     final sample = _language == SttLanguage.persian
-        ? 'سلام، این یک متن آزمایشی فارسی است. لطفاً مدل واقعی را فعال کنید.'
-        : 'Hello, this is a sample English text. Please enable the real model.';
+        ? 'این یک متن آزمایشی است. بعد از اتصال مدل واقعی، صدای شما به متن تبدیل می‌شود.'
+        : 'This is sample text. After connecting the real model, your speech will be converted.';
 
     if (_finalText.isEmpty) {
       _finalText = sample;
     } else {
-      _finalText = '$_finalText $sample';
+      _finalText = '$_finalText\n$sample';
     }
 
     _state = SttState.idle;

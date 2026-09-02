@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 
 class BigMicButton extends StatelessWidget {
   final bool isListening;
+  final bool enabled;
   final VoidCallback onPressed;
 
   const BigMicButton({
     super.key,
     required this.isListening,
     required this.onPressed,
+    this.enabled = true,
   });
 
   @override
@@ -17,20 +18,18 @@ class BigMicButton extends StatelessWidget {
 
     return Semantics(
       button: true,
-      enabled: true,
-      label: isListening
-          ? 'توقف ضبط صدا'
-          : 'شروع ضبط صدا',
+      enabled: enabled,
+      label: isListening ? 'توقف ضبط صدا' : 'شروع ضبط صدا',
       hint: isListening
           ? 'برای توقف و تبدیل صدا به متن دوبار ضربه بزنید'
           : 'برای شروع صحبت کردن دوبار ضربه بزنید',
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onPressed,
+          onTap: enabled ? onPressed : null,
           borderRadius: BorderRadius.circular(100),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 280),
             width: 120,
             height: 120,
             decoration: BoxDecoration(
@@ -38,29 +37,27 @@ class BigMicButton extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: isListening
-                    ? [
-                        colorScheme.error,
-                        colorScheme.errorContainer,
-                      ]
-                    : [
-                        colorScheme.primary,
-                        colorScheme.primaryContainer,
-                      ],
+                colors: !enabled
+                    ? [Colors.grey.shade500, Colors.grey.shade700]
+                    : isListening
+                        ? [colorScheme.error, colorScheme.errorContainer]
+                        : [colorScheme.primary, colorScheme.primaryContainer],
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: (isListening ? colorScheme.error : colorScheme.primary)
-                      .withOpacity(0.4),
-                  blurRadius: 20,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              boxShadow: enabled
+                  ? [
+                      BoxShadow(
+                        color: (isListening ? colorScheme.error : colorScheme.primary)
+                            .withOpacity(0.35),
+                        blurRadius: 18,
+                        spreadRadius: 1,
+                        offset: const Offset(0, 5),
+                      ),
+                    ]
+                  : null,
             ),
             child: Icon(
               isListening ? Icons.stop_rounded : Icons.mic_rounded,
-              size: 56,
+              size: 54,
               color: isListening
                   ? colorScheme.onError
                   : colorScheme.onPrimary,
