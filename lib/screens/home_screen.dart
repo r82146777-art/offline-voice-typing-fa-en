@@ -33,7 +33,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final downloader = context.read<ModelDownloader>();
     final stt = context.read<SttService>();
 
-    // دانلود مدل زبان فعلی
     final lang = stt.langCode;
     await downloader.ensureModel(lang);
 
@@ -58,7 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    // همگام‌سازی متن
     if (stt.finalText.isNotEmpty && _textController.text != stt.finalText) {
       _textController.text = stt.finalText;
       _textController.selection = TextSelection.fromPosition(
@@ -79,7 +77,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               stt.clearText();
               _textController.clear();
-              tts.speak('متن پاک شد');
             },
             icon: const Icon(Icons.delete_outline),
           ),
@@ -93,9 +90,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const LanguageSwitcher(),
               const SizedBox(height: 12),
 
-              // نوار پیشرفت دانلود مدل
               if (isDownloading) ...[
-                LinearProgressIndicator(value: downloader.progress),
+                LinearProgressIndicator(value: downloader.progress > 0 ? downloader.progress : null),
                 const SizedBox(height: 8),
                 Text(
                   downloader.status == DownloadStatus.extracting
@@ -106,17 +102,38 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
               ],
 
-              if (downloader.status == DownloadStatus.error)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'خطا در دانلود مدل: ${downloader.errorMessage}',
-                    style: TextStyle(color: colorScheme.error),
-                    textAlign: TextAlign.center,
+              if (downloader.status == DownloadStatus.error) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.errorContainer.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        downloader.errorMessage ?? 'خطا در دانلود مدل',
+                        style: TextStyle(color: colorScheme.onErrorContainer),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: () async {
+                          await downloader.retryCurrent();
+                          if (downloader.status == DownloadStatus.ready) {
+                            stt.setModelReady(true);
+                          }
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('تلاش مجدد'),
+                      ),
+                    ],
                   ),
                 ),
+              ],
 
-              // ناحیه متن
               Expanded(
                 child: Container(
                   width: double.infinity,
@@ -169,17 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: () async {
                   if (stt.isListening) {
                     await stt.stopListening();
-                    await tts.speak(
-                      stt.language == SttLanguage.persian
-                          ? 'ضبط متوقف شد'
-                          : 'Recording stopped',
-                    );
                   } else {
-                    await tts.speak(
-                      stt.language == SttLanguage.persian
-                          ? 'شروع ضبط'
-                          : 'Start recording',
-                    );
                     await stt.startListening();
                   }
                 },
@@ -212,17 +219,23 @@ class _HomeScreenState extends State<HomeScreen> {
       return 'در حال آماده‌سازی مدل...';
     }
     if (downloader.status == DownloadStatus.error) {
-      return 'خطا در مدل';
+      return 'خطا در دانلود مدل';
     }
     switch (stt.state) {
       case SttState.idle:
-        return stt.modelReady ? (stt.language == SttLanguage.persian ? 'آماده' : 'Ready') : 'مدل آماده نیست';
+        return stt.modelReady
+            ? (stt.language == SttLanguage.persian ? 'آماده' : 'Ready')
+            : 'مدل آماده نیست';
       case SttState.initializing:
         return 'در حال آماده‌سازی...';
       case SttState.listening:
-        return stt.language == SttLanguage.persian ? 'در حال گوش دادن...' : 'Listening...';
+        return stt.language == SttLanguage.persian
+            ? 'در حال گوش دادن...'
+            : 'Listening...';
       case SttState.processing:
-        return stt.language == SttLanguage.persian ? 'در حال پردازش...' : 'Processing...';
+        return stt.language == SttLanguage.persian
+            ? 'در حال پردازش...'
+            : 'Processing...';
       case SttState.error:
         return stt.errorMessage ?? 'خطا';
     }

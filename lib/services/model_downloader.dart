@@ -12,14 +12,21 @@ class ModelDownloader extends ChangeNotifier {
   String? errorMessage;
   String? currentLanguage;
 
+  // چند آدرس مختلف برای هر مدل (در صورت قطع بودن یکی، بعدی امتحان می‌شود)
   static const _models = {
     'fa': {
-      'url': 'https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip',
       'folder': 'vosk-model-small-fa-0.42',
+      'urls': [
+        'https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip',
+        'https://github.com/alphacep/vosk-api/releases/download/0.3.42/vosk-model-small-fa-0.42.zip',
+      ],
     },
     'en': {
-      'url': 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip',
       'folder': 'vosk-model-small-en-us-0.15',
+      'urls': [
+        'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip',
+        'https://github.com/alphacep/vosk-api/releases/download/0.3.42/vosk-model-small-en-us-0.15.zip',
+      ],
     },
   };
 
@@ -34,10 +41,9 @@ class ModelDownloader extends ChangeNotifier {
 
   Future<bool> isModelReady(String lang) async {
     final base = await modelsDir;
-    final folder = _models[lang]!['folder']!;
-    final modelPath = Directory('$base/$folder');
+    final folder = _models[lang]!['folder'] as String;
     final mdlFile = File('$base/$folder/am/final.mdl');
-    return await modelPath.exists() && await mdlFile.exists();
+    return await mdlFile.exists();
   }
 
   Future<String?> getModelPath(String lang) async {
@@ -51,6 +57,7 @@ class ModelDownloader extends ChangeNotifier {
   Future<void> ensureModel(String lang) async {
     if (await isModelReady(lang)) {
       status = DownloadStatus.ready;
+      errorMessage = null;
       notifyListeners();
       return;
     }
@@ -61,16 +68,44 @@ class ModelDownloader extends ChangeNotifier {
     errorMessage = null;
     notifyListeners();
 
-    try {
-      final base = await modelsDir;
-      final zipPath = '$base/$lang.zip';
-      final url = _models[lang]!['url']!;
+    final urls = List<String>.from(_models[lang]!['urls'] as List);
+    Exception? lastError;
 
+    for (final url in urls) {
+      try {
+        await _downloadAndExtract(lang, url);
+        status = DownloadStatus.ready;
+        progress = 1.0;
+        errorMessage = null;
+        notifyListeners();
+        return;
+      } catch (e) {
+        lastError = e is Exception ? e : Exception(e.toString());
+        debugPrint('Download failed from $url → $e');
+      }
+    }
+
+    status = DownloadStatus.error;
+    errorMessage =
+        'نتوانست مدل را دانلود کند.\n\n' +
+        'لطفاً اتصال اینترنت را چک کنید یا VPN روشن کنید و دوباره امتحان کنید.\n\n' +
+        'جزئیات: ${lastError?.toString() ?? "خطای ناشناخته"}';
+    notifyListeners();
+  }
+
+  Future<void> _downloadAndExtract(String lang, String url) async {
+    final base = await modelsDir;
+    final zipPath = '$base/$lang.zip';
+
+    final client = http.Client();
+    try {
       final request = http.Request('GET', Uri.parse(url));
-      final response = await http.Client().send(request);
+      final response = await client.send(request).timeout(
+            const Duration(seconds: 90),
+          );
 
       if (response.statusCode != 200) {
-        throw Exception('دانلود ناموفق: ${response.statusCode}');
+        throw Exception('کد خطا: ${response.statusCode}');
       }
 
       final total = response.contentLength ?? 0;
@@ -82,7 +117,7 @@ class ModelDownloader extends ChangeNotifier {
         sink.add(chunk);
         received += chunk.length;
         if (total > 0) {
-          progress = received / total;
+          progress = (received / total).clamp(0.0, 0.95);
           notifyListeners();
         }
       }
@@ -94,33 +129,28 @@ class ModelDownloader extends ChangeNotifier {
       final bytes = await file.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
 
-      for (final file in archive) {
-        final filename = '$base/${file.name}';
-        if (file.isFile) {
+      for (final entry in archive) {
+        final filename = '$base/${entry.name}';
+        if (entry.isFile) {
           final outFile = File(filename);
           await outFile.parent.create(recursive: true);
-          await outFile.writeAsBytes(file.content as List<int>);
+          await outFile.writeAsBytes(entry.content as List<int>);
         } else {
           await Directory(filename).create(recursive: true);
         }
       }
 
-      await file.delete();
-
-      status = DownloadStatus.ready;
-      progress = 1.0;
-      notifyListeners();
-    } catch (e, st) {
-      debugPrint('Model download error: $e\n$st');
-      status = DownloadStatus.error;
-      errorMessage = e.toString();
-      notifyListeners();
+      try {
+        await file.delete();
+      } catch (_) {}
+    } finally {
+      client.close();
     }
   }
 
-  Future<void> ensureBothModels() async {
-    await ensureModel('fa');
-    if (status == DownloadStatus.error) return;
-    await ensureModel('en');
+  Future<void> retryCurrent() async {
+    if (currentLanguage != null) {
+      await ensureModel(currentLanguage!);
+    }
   }
 }
