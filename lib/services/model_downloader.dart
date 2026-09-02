@@ -1,33 +1,27 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive.dart';
 
-enum DownloadStatus { idle, checking, downloading, extracting, ready, error }
+enum DownloadStatus { idle, checking, extracting, ready, error }
 
+/// مدل‌ها داخل خود APK هستند (assets).
+/// این کلاس فقط آن‌ها را یک‌بار به حافظه داخلی کپی/استخراج می‌کند.
 class ModelDownloader extends ChangeNotifier {
   DownloadStatus status = DownloadStatus.idle;
   double progress = 0.0;
   String? errorMessage;
   String? currentLanguage;
 
-  // آدرس‌های جایگزین (Hugging Face معمولاً در ایران بهتر باز می‌شود)
   static const _models = {
     'fa': {
+      'asset': 'assets/models/vosk-model-small-fa-0.42.zip',
       'folder': 'vosk-model-small-fa-0.42',
-      'urls': [
-        'https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip',
-        'https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip',
-      ],
     },
     'en': {
+      'asset': 'assets/models/vosk-model-small-en-us-0.15.zip',
       'folder': 'vosk-model-small-en-us-0.15',
-      'urls': [
-        'https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip',
-        'https://huggingface.co/grimso/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip',
-        'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip',
-      ],
     },
   };
 
@@ -42,7 +36,7 @@ class ModelDownloader extends ChangeNotifier {
 
   Future<bool> isModelReady(String lang) async {
     final base = await modelsDir;
-    final folder = _models[lang]!['folder'] as String;
+    final folder = _models[lang]!['folder']!;
     final mdlFile = File('$base/$folder/am/final.mdl');
     return await mdlFile.exists();
   }
@@ -63,79 +57,28 @@ class ModelDownloader extends ChangeNotifier {
       return;
     }
 
-    status = DownloadStatus.downloading;
+    status = DownloadStatus.extracting;
     currentLanguage = lang;
-    progress = 0.0;
+    progress = 0.1;
     errorMessage = null;
     notifyListeners();
 
-    final urls = List<String>.from(_models[lang]!['urls'] as List);
-    Exception? lastError;
-
-    for (final url in urls) {
-      try {
-        debugPrint('Trying download from: $url');
-        await _downloadAndExtract(lang, url);
-        status = DownloadStatus.ready;
-        progress = 1.0;
-        errorMessage = null;
-        notifyListeners();
-        return;
-      } catch (e) {
-        lastError = e is Exception ? e : Exception(e.toString());
-        debugPrint('Download failed from $url → $e');
-      }
-    }
-
-    status = DownloadStatus.error;
-    errorMessage =
-        'نتوانست مدل را دانلود کند.\n\n' +
-        'لطفاً:\n' +
-        '۱. اتصال اینترنت را چک کنید\n' +
-        '۲. اگر لازم است VPN روشن کنید\n' +
-        '۳. دکمه تلاش مجدد را بزنید\n\n' +
-        'جزئیات فنی: ${lastError?.toString() ?? "خطای ناشناخته"}';
-    notifyListeners();
-  }
-
-  Future<void> _downloadAndExtract(String lang, String url) async {
-    final base = await modelsDir;
-    final zipPath = '$base/$lang.zip';
-
-    final client = http.Client();
     try {
-      final request = http.Request('GET', Uri.parse(url));
-      // برخی سرورها نیاز به User-Agent دارند
-      request.headers['User-Agent'] = 'OfflineVoiceTyping/1.0 (Android)';
+      final assetPath = _models[lang]!['asset']!;
+      final folderName = _models[lang]!['folder']!;
+      final base = await modelsDir;
 
-      final response = await client.send(request).timeout(
-            const Duration(seconds: 120),
-          );
+      // خواندن فایل زیپ از assets
+      final byteData = await rootBundle.load(assetPath);
+      final bytes = byteData.buffer.asUint8List();
 
-      if (response.statusCode != 200) {
-        throw Exception('کد خطا: ${response.statusCode}');
-      }
-
-      final total = response.contentLength ?? 0;
-      final file = File(zipPath);
-      final sink = file.openWrite();
-      int received = 0;
-
-      await for (final chunk in response.stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        if (total > 0) {
-          progress = (received / total).clamp(0.0, 0.95);
-          notifyListeners();
-        }
-      }
-      await sink.close();
-
-      status = DownloadStatus.extracting;
+      progress = 0.4;
       notifyListeners();
 
-      final bytes = await file.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
+
+      progress = 0.6;
+      notifyListeners();
 
       for (final entry in archive) {
         final filename = '$base/${entry.name}';
@@ -148,16 +91,35 @@ class ModelDownloader extends ChangeNotifier {
         }
       }
 
-      try {
-        await file.delete();
-      } catch (_) {}
-    } finally {
-      client.close();
+      // بررسی نهایی
+      final mdlFile = File('$base/$folderName/am/final.mdl');
+      if (!await mdlFile.exists()) {
+        throw Exception('فایل مدل بعد از استخراج پیدا نشد');
+      }
+
+      status = DownloadStatus.ready;
+      progress = 1.0;
+      errorMessage = null;
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('Model extract error: $e\n$st');
+      status = DownloadStatus.error;
+      errorMessage = 'خطا در آماده‌سازی مدل:\n$e';
+      notifyListeners();
     }
   }
 
   Future<void> retryCurrent() async {
     if (currentLanguage != null) {
+      // پاک کردن مدل ناقص و تلاش مجدد
+      try {
+        final base = await modelsDir;
+        final folder = _models[currentLanguage]!['folder']!;
+        final dir = Directory('$base/$folder');
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      } catch (_) {}
       await ensureModel(currentLanguage!);
     }
   }

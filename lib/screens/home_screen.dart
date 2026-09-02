@@ -53,7 +53,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final stt = context.watch<SttService>();
     final downloader = context.watch<ModelDownloader>();
-    final tts = context.read<TtsService>();
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -64,8 +63,8 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final isDownloading = downloader.status == DownloadStatus.downloading ||
-        downloader.status == DownloadStatus.extracting;
+    final isPreparing = downloader.status == DownloadStatus.extracting ||
+        downloader.status == DownloadStatus.checking;
 
     return Scaffold(
       appBar: AppBar(
@@ -90,13 +89,11 @@ class _HomeScreenState extends State<HomeScreen> {
               const LanguageSwitcher(),
               const SizedBox(height: 12),
 
-              if (isDownloading) ...[
-                LinearProgressIndicator(value: downloader.progress > 0 ? downloader.progress : null),
+              if (isPreparing) ...[
+                const LinearProgressIndicator(),
                 const SizedBox(height: 8),
                 Text(
-                  downloader.status == DownloadStatus.extracting
-                      ? 'در حال استخراج مدل...'
-                      : 'در حال دانلود مدل (${(downloader.progress * 100).toStringAsFixed(0)}٪)',
+                  'در حال آماده‌سازی مدل آفلاین...',
                   style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
@@ -114,7 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     children: [
                       Text(
-                        downloader.errorMessage ?? 'خطا در دانلود مدل',
+                        downloader.errorMessage ?? 'خطا در آماده‌سازی مدل',
                         style: TextStyle(color: colorScheme.onErrorContainer),
                         textAlign: TextAlign.center,
                       ),
@@ -182,7 +179,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
               BigMicButton(
                 isListening: stt.isListening,
-                enabled: !isDownloading && stt.modelReady && _permissionGranted,
+                enabled: !isPreparing && stt.modelReady && _permissionGranted,
                 onPressed: () async {
                   if (stt.isListening) {
                     await stt.stopListening();
@@ -196,8 +193,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
               Text(
                 stt.language == SttLanguage.persian
-                    ? 'دکمه را فشار دهید و صحبت کنید. دوباره فشار دهید تا متن درج شود.'
-                    : 'Press the button and speak. Press again to insert the text.',
+                    ? 'مدل‌ها داخل اپ هستند. نیازی به اینترنت نیست.'
+                    : 'Models are bundled. No internet needed.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurface.withOpacity(0.65),
                 ),
@@ -212,19 +209,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _statusText(SttService stt, ModelDownloader downloader) {
-    if (downloader.status == DownloadStatus.downloading) {
-      return 'در حال دانلود مدل...';
-    }
     if (downloader.status == DownloadStatus.extracting) {
       return 'در حال آماده‌سازی مدل...';
     }
     if (downloader.status == DownloadStatus.error) {
-      return 'خطا در دانلود مدل';
+      return 'خطا در مدل';
     }
     switch (stt.state) {
       case SttState.idle:
         return stt.modelReady
-            ? (stt.language == SttLanguage.persian ? 'آماده' : 'Ready')
+            ? (stt.language == SttLanguage.persian ? 'آماده (آفلاین)' : 'Ready (Offline)')
             : 'مدل آماده نیست';
       case SttState.initializing:
         return 'در حال آماده‌سازی...';

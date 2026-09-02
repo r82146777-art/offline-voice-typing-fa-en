@@ -1,7 +1,7 @@
 name: offline_voice_typing
 description: Offline voice typing for Persian and English with strong accessibility.
 publish_to: 'none'
-version: 0.1.2+3
+version: 0.2.0+4
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -12,12 +12,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   path_provider: ^2.1.4
   permission_handler: ^11.3.1
-  http: ^1.2.2
   archive: ^3.6.1
   provider: ^6.1.2
   google_fonts: ^6.2.1
   flutter_animate: ^4.5.0
-  # flutter_tts موقتاً حذف شد تا بیلد پاس شود (بعداً اضافه می‌کنیم)
 
 dev_dependencies:
   flutter_test:
@@ -27,4 +25,4 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/
+    - assets/models/
