@@ -22,23 +22,16 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.27.1'
           channel: 'stable'
           cache: true
 
       - name: Create clean Flutter project
         run: |
-          # Backup our source code
           mkdir -p /tmp/backup
           cp -r lib pubspec.yaml README.md /tmp/backup/ 2>/dev/null || true
-          
-          # Remove any broken android/ios folders
           rm -rf android ios linux macos windows web
-          
-          # Create a fresh Flutter project
           flutter create --org com.offlinevoicetyping --project-name offline_voice_typing --platforms=android .
-          
-          # Restore our source code
           cp -r /tmp/backup/lib .
           cp /tmp/backup/pubspec.yaml .
           cp /tmp/backup/README.md . 2>/dev/null || true
@@ -65,13 +58,11 @@ jobs:
           body: |
             نسخه ساخته‌شده با GitHub Actions
 
-            ### ویژگی‌ها:
-            - دانلود خودکار مدل‌های Vosk (فارسی + انگلیسی)
+            - دانلود خودکار مدل‌های Vosk
             - رابط کاربری دسترسی‌پذیر
             - سوئیچ زبان فارسی / انگلیسی
-            - کاملاً آفلاین بعد از دانلود اولیه مدل‌ها
 
-            **توجه:** تشخیص گفتار واقعی هنوز به موتور Vosk وصل نشده و فعلاً متن نمونه نمایش می‌دهد.
+            توجه: TTS و تشخیص گفتار واقعی هنوز کامل وصل نشده‌اند.
           files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: true

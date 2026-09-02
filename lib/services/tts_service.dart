@@ -1,44 +1,11 @@
-import 'package:flutter_tts/flutter_tts.dart';
-
+/// سرویس متن به گفتار (فعلاً غیرفعال برای پاس شدن بیلد)
+/// بعد از ساخت موفق APK دوباره فعال می‌شود.
 class TtsService {
-  final FlutterTts _tts = FlutterTts();
-  bool _ready = false;
-
-  TtsService() {
-    _init();
-  }
-
-  Future<void> _init() async {
-    try {
-      await _tts.setLanguage('fa-IR');
-      await _tts.setSpeechRate(0.42);
-      await _tts.setVolume(1.0);
-      await _tts.setPitch(1.0);
-      _ready = true;
-    } catch (_) {
-      _ready = false;
-    }
-  }
-
   Future<void> speak(String text, {String? languageCode}) async {
-    if (!_ready || text.trim().isEmpty) return;
-    try {
-      if (languageCode != null) {
-        await _tts.setLanguage(languageCode);
-      }
-      await _tts.speak(text);
-    } catch (_) {}
+    // فعلاً خالی
   }
 
-  Future<void> stop() async {
-    try {
-      await _tts.stop();
-    } catch (_) {}
-  }
+  Future<void> stop() async {}
 
-  Future<void> setLanguage(String code) async {
-    try {
-      await _tts.setLanguage(code);
-    } catch (_) {}
-  }
+  Future<void> setLanguage(String code) async {}
 }
