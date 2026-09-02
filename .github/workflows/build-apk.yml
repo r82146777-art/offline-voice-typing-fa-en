@@ -26,11 +26,22 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Create Flutter project structure if needed
+      - name: Create clean Flutter project
         run: |
-          if [ ! -d "android" ]; then
-            flutter create --org com.offlinevoicetyping --project-name offline_voice_typing .
-          fi
+          # Backup our source code
+          mkdir -p /tmp/backup
+          cp -r lib pubspec.yaml README.md /tmp/backup/ 2>/dev/null || true
+          
+          # Remove any broken android/ios folders
+          rm -rf android ios linux macos windows web
+          
+          # Create a fresh Flutter project
+          flutter create --org com.offlinevoicetyping --project-name offline_voice_typing --platforms=android .
+          
+          # Restore our source code
+          cp -r /tmp/backup/lib .
+          cp /tmp/backup/pubspec.yaml .
+          cp /tmp/backup/README.md . 2>/dev/null || true
 
       - name: Get dependencies
         run: flutter pub get
@@ -56,11 +67,11 @@ jobs:
 
             ### ویژگی‌ها:
             - دانلود خودکار مدل‌های Vosk (فارسی + انگلیسی)
-            - رابط کاربری دسترسی‌پذیر برای نابینایان و افراد بینا
+            - رابط کاربری دسترسی‌پذیر
             - سوئیچ زبان فارسی / انگلیسی
             - کاملاً آفلاین بعد از دانلود اولیه مدل‌ها
 
-            **توجه:** تشخیص گفتار واقعی هنوز به موتور Vosk وصل نشده و فعلاً متن نمونه نمایش می‌دهد. بعد از تست بازخورد بدهید تا کامل شود.
+            **توجه:** تشخیص گفتار واقعی هنوز به موتور Vosk وصل نشده و فعلاً متن نمونه نمایش می‌دهد.
           files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: true
