@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'screens/home_screen.dart';
 import 'services/stt_service.dart';
@@ -38,7 +37,7 @@ class OfflineVoiceTypingApp extends StatelessWidget {
             seedColor: const Color(0xFF006A6A),
             brightness: Brightness.light,
           ),
-          textTheme: GoogleFonts.vazirmatnTextTheme(),
+          fontFamily: 'sans-serif',
         ),
         darkTheme: ThemeData(
           useMaterial3: true,
@@ -46,9 +45,7 @@ class OfflineVoiceTypingApp extends StatelessWidget {
             seedColor: const Color(0xFF4DD0E1),
             brightness: Brightness.dark,
           ),
-          textTheme: GoogleFonts.vazirmatnTextTheme(
-            ThemeData(brightness: Brightness.dark).textTheme,
-          ),
+          fontFamily: 'sans-serif',
         ),
         home: const HomeScreen(),
       ),
