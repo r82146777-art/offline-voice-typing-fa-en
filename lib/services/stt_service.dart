@@ -1,8 +1,6 @@
-import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:vosk_flutter/vosk_flutter.dart';
-import 'model_downloader.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_recognition_result.dart';
 
 enum SttLanguage { persian, english }
 
@@ -16,14 +14,8 @@ class SttService extends ChangeNotifier {
   String? _errorMessage;
   bool _modelReady = false;
 
-  final VoskFlutterPlugin _vosk = VoskFlutterPlugin.instance();
-  Model? _model;
-  Recognizer? _recognizer;
-  SpeechService? _speechService;
-  StreamSubscription? _partialSub;
-  StreamSubscription? _resultSub;
-
-  ModelDownloader? _downloader;
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _initialized = false;
 
   SttState get state => _state;
   SttLanguage get language => _language;
@@ -35,16 +27,12 @@ class SttService extends ChangeNotifier {
 
   String get langCode => _language == SttLanguage.persian ? 'fa' : 'en';
 
-  void attachDownloader(ModelDownloader downloader) {
-    _downloader = downloader;
-  }
+  String get _localeId =>
+      _language == SttLanguage.persian ? 'fa_IR' : 'en_US';
 
   void setLanguage(SttLanguage lang) {
     if (_language != lang) {
       _language = lang;
-      // مدل قبلی را رها کن تا با زبان جدید لود شود
-      _disposeEngine();
-      _modelReady = false;
       notifyListeners();
     }
   }
@@ -55,67 +43,37 @@ class SttService extends ChangeNotifier {
   }
 
   Future<void> ensureEngineReady() async {
-    if (_speechService != null && _modelReady) return;
+    if (_initialized && _modelReady) return;
 
     _state = SttState.initializing;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      final downloader = _downloader;
-      if (downloader == null) {
-        throw Exception('ModelDownloader متصل نیست');
-      }
-
-      await downloader.ensureModel(langCode);
-      final modelPath = await downloader.getModelPath(langCode);
-      if (modelPath == null) {
-        throw Exception('مسیر مدل پیدا نشد');
-      }
-
-      _model = await _vosk.createModel(modelPath);
-      _recognizer = await _vosk.createRecognizer(
-        model: _model!,
-        sampleRate: 16000,
+      final ok = await _speech.initialize(
+        onError: (e) {
+          _errorMessage = e.errorMsg;
+          _state = SttState.error;
+          notifyListeners();
+        },
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (_state == SttState.listening) {
+              _state = SttState.idle;
+              notifyListeners();
+            }
+          }
+        },
       );
 
-      _speechService = await _vosk.initSpeechService(_recognizer!);
-
-      _partialSub?.cancel();
-      _resultSub?.cancel();
-
-      _partialSub = _speechService!.onPartial().listen((jsonStr) {
-        try {
-          final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-          final partial = (map['partial'] as String?) ?? '';
-          if (partial.isNotEmpty) {
-            _partialText = partial;
-            notifyListeners();
-          }
-        } catch (_) {}
-      });
-
-      _resultSub = _speechService!.onResult().listen((jsonStr) {
-        try {
-          final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-          final text = (map['text'] as String?)?.trim() ?? '';
-          if (text.isNotEmpty) {
-            if (_finalText.isEmpty) {
-              _finalText = text;
-            } else {
-              _finalText = '$_finalText $text';
-            }
-            _partialText = '';
-            notifyListeners();
-          }
-        } catch (_) {}
-      });
-
-      _modelReady = true;
-      _state = SttState.idle;
+      _initialized = ok;
+      _modelReady = ok;
+      _state = ok ? SttState.idle : SttState.error;
+      if (!ok) {
+        _errorMessage = 'موتور تشخیص گفتار در دسترس نیست';
+      }
       notifyListeners();
-    } catch (e, st) {
-      debugPrint('STT init error: $e\n$st');
+    } catch (e) {
       _errorMessage = e.toString();
       _state = SttState.error;
       _modelReady = false;
@@ -127,23 +85,49 @@ class SttService extends ChangeNotifier {
     if (_state == SttState.listening) return;
 
     try {
-      if (_speechService == null) {
+      if (!_initialized) {
         await ensureEngineReady();
       }
-      if (_speechService == null) {
-        throw Exception(_errorMessage ?? 'موتور تشخیص آماده نیست');
+      if (!_initialized) {
+        throw Exception(_errorMessage ?? 'موتور آماده نیست');
       }
 
       _partialText = '';
       _errorMessage = null;
-      await _speechService!.start();
       _state = SttState.listening;
       notifyListeners();
+
+      await _speech.listen(
+        onResult: _onResult,
+        localeId: _localeId,
+        listenOptions: stt.SpeechListenOptions(
+          partialResults: true,
+          cancelOnError: false,
+          listenMode: stt.ListenMode.dictation,
+        ),
+      );
     } catch (e) {
       _errorMessage = e.toString();
       _state = SttState.error;
       notifyListeners();
     }
+  }
+
+  void _onResult(SpeechRecognitionResult result) {
+    if (result.finalResult) {
+      final text = result.recognizedWords.trim();
+      if (text.isNotEmpty) {
+        if (_finalText.isEmpty) {
+          _finalText = text;
+        } else {
+          _finalText = '$_finalText $text';
+        }
+      }
+      _partialText = '';
+    } else {
+      _partialText = result.recognizedWords;
+    }
+    notifyListeners();
   }
 
   Future<void> stopListening() async {
@@ -152,10 +136,8 @@ class SttService extends ChangeNotifier {
     try {
       _state = SttState.processing;
       notifyListeners();
+      await _speech.stop();
 
-      await _speechService?.stop();
-
-      // اگر نتیجه‌ای از onResult نیامد ولی partial داشتیم
       if (_partialText.trim().isNotEmpty) {
         final t = _partialText.trim();
         if (_finalText.isEmpty) {
@@ -184,24 +166,5 @@ class SttService extends ChangeNotifier {
   void setFinalText(String text) {
     _finalText = text;
     notifyListeners();
-  }
-
-  void _disposeEngine() {
-    _partialSub?.cancel();
-    _resultSub?.cancel();
-    _partialSub = null;
-    _resultSub = null;
-    try {
-      _speechService?.stop();
-    } catch (_) {}
-    _speechService = null;
-    _recognizer = null;
-    _model = null;
-  }
-
-  @override
-  void dispose() {
-    _disposeEngine();
-    super.dispose();
   }
 }
