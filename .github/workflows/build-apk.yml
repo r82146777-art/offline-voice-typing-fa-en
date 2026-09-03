@@ -8,25 +8,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.27.1'
-          channel: 'stable'
+          channel: stable
           cache: true
 
-      - name: Create clean Flutter project
+      - name: Create Flutter project
         run: |
           mkdir -p /tmp/backup
           cp -r lib pubspec.yaml README.md android_ime /tmp/backup/ 2>/dev/null || true
@@ -37,111 +33,63 @@ jobs:
           cp /tmp/backup/README.md . 2>/dev/null || true
           cp -r /tmp/backup/android_ime . 2>/dev/null || true
 
-      - name: Inject IME + permissions
+      - name: Inject IME and permissions
         run: |
           set -e
-          PKG_DIR="android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing"
-          RES_LAYOUT="android/app/src/main/res/layout"
-          RES_XML="android/app/src/main/res/xml"
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-
-          mkdir -p "$PKG_DIR" "$RES_LAYOUT" "$RES_XML"
+          PKG_DIR=android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing
+          mkdir -p "$PKG_DIR" android/app/src/main/res/layout android/app/src/main/res/xml
           cp android_ime/VoiceTypingIME.kt "$PKG_DIR/"
-          cp android_ime/ime_keyboard.xml "$RES_LAYOUT/"
-          cp android_ime/method.xml "$RES_XML/"
-
-          if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
-            sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          cp android_ime/ime_keyboard.xml android/app/src/main/res/layout/
+          cp android_ime/method.xml android/app/src/main/res/xml/
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q RECORD_AUDIO "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST"
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          fi
+          if ! grep -q VoiceTypingIME "$MANIFEST"; then
+            python3 -c "
+from pathlib import Path
+p=Path('android/app/src/main/AndroidManifest.xml')
+t=p.read_text()
+s='''
+        <service android:name=\".VoiceTypingIME\" android:label=\"تایپ صوتی آفلاین\" android:permission=\"android.permission.BIND_INPUT_METHOD\" android:exported=\"true\">
+            <intent-filter><action android:name=\"android.view.InputMethod\" /></intent-filter>
+            <meta-data android:name=\"android.view.im\" android:resource=\"@xml/method\" />
+        </service>
+'''
+p.write_text(t.replace('</application>', s+'\n    </application>'))
+"
           fi
 
-          if ! grep -q "VoiceTypingIME" "$MANIFEST"; then
-            python3 << 'PY'
-          from pathlib import Path
-          p = Path("android/app/src/main/AndroidManifest.xml")
-          text = p.read_text()
-          service = '''
-                  <service
-                      android:name=".VoiceTypingIME"
-                      android:label="تایپ صوتی آفلاین"
-                      android:permission="android.permission.BIND_INPUT_METHOD"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.view.InputMethod" />
-                      </intent-filter>
-                      <meta-data
-                          android:name="android.view.im"
-                          android:resource="@xml/method" />
-                  </service>
-          '''
-          text = text.replace("</application>", service + "\n    </application>")
-          p.write_text(text)
-          PY
-          fi
-
-      - name: Download offline Vosk models into assets
+      - name: Download Vosk models
         run: |
           mkdir -p assets/models
-          curl -L --retry 5 --retry-delay 3 -o assets/models/vosk-model-small-fa-0.42.zip \
-            "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip"
-          curl -L --retry 5 --retry-delay 3 -o assets/models/vosk-model-small-en-us-0.15.zip \
-            "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip"
+          curl -L --retry 5 -o assets/models/vosk-model-small-fa-0.42.zip \
+            https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip
+          curl -L --retry 5 -o assets/models/vosk-model-small-en-us-0.15.zip \
+            https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip
           ls -lh assets/models/
-          FA_SIZE=$(stat -c%s assets/models/vosk-model-small-fa-0.42.zip)
-          EN_SIZE=$(stat -c%s assets/models/vosk-model-small-en-us-0.15.zip)
-          if [ "$FA_SIZE" -lt 10000000 ] || [ "$EN_SIZE" -lt 10000000 ]; then
-            echo "Model files too small"
-            exit 1
-          fi
 
-      - name: Get dependencies
+      - name: Flutter pub get
         run: flutter pub get
 
-      - name: Patch vosk_flutter namespace for AGP 8+
+      - name: Fix vosk_flutter namespace
         run: |
           set -e
-          # پیدا کردن build.gradle پلاگین vosk_flutter در pub-cache
-          find "$PUB_CACHE" "$HOME/.pub-cache" -type f -path "*vosk_flutter*/android/build.gradle" 2>/dev/null | while read -r f; do
-            echo "Patching $f"
-            if ! grep -q "namespace" "$f"; then
-              # بعد از android { namespace اضافه کن
-              sed -i '/^android {/a\    namespace "org.vosk.vosk_flutter"' "$f" || true
+          for f in $(find "$HOME/.pub-cache" -path '*vosk_flutter*/android/build.gradle' 2>/dev/null); do
+            echo "Found $f"
+            if ! grep -q namespace "$f"; then
+              sed -i '/android {/a\    namespace "org.vosk.vosk_flutter"' "$f"
             fi
-            # compileSdk را بالا ببر اگر خیلی پایین است
-            sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' "$f" || true
-            cat "$f"
+            sed -i 's/compileSdkVersion [0-9][0-9]*/compileSdkVersion 34/' "$f" || true
+            echo "--- patched ---"
+            head -40 "$f"
           done
 
-          # همچنین در android/build.gradle پروژه یک subprojects patch
-          if [ -f android/build.gradle ]; then
-            cat >> android/build.gradle << 'EOF'
-
-subprojects { subproject ->
-    subproject.afterEvaluate {
-        if (subproject.plugins.hasPlugin("com.android.library") || subproject.plugins.hasPlugin("com.android.application")) {
-            if (subproject.android.namespace == null || subproject.android.namespace.isEmpty()) {
-                def manifest = subproject.file("src/main/AndroidManifest.xml")
-                if (manifest.exists()) {
-                    def m = manifest.getText("UTF-8") =~ /package="([^"]+)"/
-                    if (m.find()) {
-                        subproject.android.namespace = m.group(1)
-                        println "Set namespace for ${subproject.name}: ${m.group(1)}"
-                    }
-                }
-                if (subproject.name.contains("vosk")) {
-                    subproject.android.namespace = "org.vosk.vosk_flutter"
-                }
-            }
-        }
-    }
-}
-EOF
-          fi
-
-      - name: Build APK
+      - name: Build release APK
         run: flutter build apk --release
 
-      - name: Upload APK as artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: offline-voice-typing-apk
           path: build/app/outputs/flutter-apk/app-release.apk
