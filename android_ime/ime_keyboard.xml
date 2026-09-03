@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#FF1A1A2E">
+
+    <TextView
+        android:id="@+id/ime_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="آماده"
+        android:textColor="#FFE0E0E0"
+        android:textSize="16sp"
+        android:paddingBottom="8dp"
+        android:contentDescription="وضعیت تشخیص گفتار" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/ime_lang"
+            android:layout_width="56dp"
+            android:layout_height="48dp"
+            android:text="FA"
+            android:contentDescription="تغییر زبان" />
+
+        <ImageButton
+            android:id="@+id/ime_mic"
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:layout_marginHorizontal="16dp"
+            android:background="@android:drawable/btn_default"
+            android:src="@android:drawable/ic_btn_speak_now"
+            android:contentDescription="شروع یا توقف ضبط صدا"
+            android:scaleType="centerInside" />
+
+        <Button
+            android:id="@+id/ime_settings"
+            android:layout_width="56dp"
+            android:layout_height="48dp"
+            android:text="⚙️"
+            android:contentDescription="باز کردن اپ" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/ime_delete"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="⌫"
+            android:contentDescription="حذف" />
+
+        <Button
+            android:id="@+id/ime_space"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="2"
+            android:layout_marginHorizontal="6dp"
+            android:text="فاصله"
+            android:contentDescription="فاصله" />
+
+        <Button
+            android:id="@+id/ime_enter"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="↵"
+            android:contentDescription="ورود" />
+    </LinearLayout>
+</LinearLayout>

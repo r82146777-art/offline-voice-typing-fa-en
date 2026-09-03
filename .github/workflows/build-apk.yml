@@ -29,21 +29,68 @@ jobs:
       - name: Create clean Flutter project
         run: |
           mkdir -p /tmp/backup
-          cp -r lib pubspec.yaml README.md /tmp/backup/ 2>/dev/null || true
+          cp -r lib pubspec.yaml README.md android_ime /tmp/backup/ 2>/dev/null || true
           rm -rf android ios linux macos windows web
           flutter create --org com.offlinevoicetyping --project-name offline_voice_typing --platforms=android .
           cp -r /tmp/backup/lib .
           cp /tmp/backup/pubspec.yaml .
           cp /tmp/backup/README.md . 2>/dev/null || true
+          cp -r /tmp/backup/android_ime . 2>/dev/null || true
 
-      - name: Add Android permissions
+      - name: Inject IME + permissions into Android project
         run: |
+          set -e
+          PKG_DIR="android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing"
+          RES_LAYOUT="android/app/src/main/res/layout"
+          RES_XML="android/app/src/main/res/xml"
           MANIFEST="android/app/src/main/AndroidManifest.xml"
+
+          mkdir -p "$PKG_DIR" "$RES_LAYOUT" "$RES_XML"
+
+          cp android_ime/VoiceTypingIME.kt "$PKG_DIR/"
+          cp android_ime/ime_keyboard.xml "$RES_LAYOUT/"
+          cp android_ime/method.xml "$RES_XML/"
+
+          # Permissions
           if ! grep -q "RECORD_AUDIO" "$MANIFEST"; then
-            sed -i 's|<manifest |<manifest |' "$MANIFEST"
-            # اضافه کردن مجوزها قبل از <application
             sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
+
+          # IME service registration (before </application>)
+          if ! grep -q "VoiceTypingIME" "$MANIFEST"; then
+            python3 << 'PY'
+          import pathlib
+          p = pathlib.Path("android/app/src/main/AndroidManifest.xml")
+          text = p.read_text()
+          service = '''
+                  <service
+                      android:name=".VoiceTypingIME"
+                      android:label="تایپ صوتی آفلاین"
+                      android:permission="android.permission.BIND_INPUT_METHOD"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.view.InputMethod" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.view.im"
+                          android:resource="@xml/method" />
+                  </service>
+          '''
+          if "</application>" in text and "VoiceTypingIME" not in text:
+              text = text.replace("</application>", service + "\n    </application>")
+              p.write_text(text)
+              print("IME service injected")
+          else:
+              print("Skip or already present")
+          print(p.read_text())
+          PY
+          fi
+
+          # Ensure minSdk is at least 24
+          sed -i 's/minSdkVersion = .*/minSdkVersion = 24/' android/app/build.gradle || true
+          sed -i 's/minSdk = .*/minSdk = 24/' android/app/build.gradle || true
+
+          echo "=== Manifest ==="
           cat "$MANIFEST"
 
       - name: Download Vosk models into assets

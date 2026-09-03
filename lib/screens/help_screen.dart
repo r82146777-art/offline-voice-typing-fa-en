@@ -1,7 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:android_intent_plus/android_intent.dart';
 
 class HelpScreen extends StatelessWidget {
   const HelpScreen({super.key});
+
+  Future<void> _openImeSettings() async {
+    try {
+      const intent = AndroidIntent(
+        action: 'android.settings.INPUT_METHOD_SETTINGS',
+      );
+      await intent.launch();
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,39 +22,40 @@ class HelpScreen extends StatelessWidget {
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
-        children: const [
-          _Section(
-            title: 'شروع کار',
+        children: [
+          const _Section(
+            title: 'شروع کار در اپ',
             body:
-                'بعد از نصب، اپ کاملاً آفلاین کار می‌کند. مدل‌های فارسی و انگلیسی داخل خود برنامه هستند و نیازی به اینترنت ندارند.',
+                'مدل‌های فارسی و انگلیسی داخل اپ هستند. مجوز میکروفون را بدهید، دکمه میکروفون را بزنید، صحبت کنید و دوباره بزنید تا متن ثبت شود.',
           ),
-          _Section(
-            title: 'چگونه تایپ صوتی کنیم؟',
+          const _Section(
+            title: 'فعال‌سازی به‌عنوان کیبورد سیستم',
             body:
-                '۱. دکمه بزرگ میکروفون را یک‌بار بزنید.\n'
-                '۲. صحبت کنید.\n'
-                '۳. دوباره دکمه را بزنید تا متن در جعبه متن درج شود.\n'
-                '۴. در صورت نیاز متن را ویرایش یا پاک کنید.',
+                '۱. دکمه زیر کردن کیبورد در پایین همین صفحه را بزنید.\n'
+                '۲. در لیست، «تایپ صوتی آفلاین» را روشن کنید.\n'
+                '۳. هنگام تایپ در هر اپ، از آیکون کیبورد نوار اعلان، این کیبورد را انتخاب کنید.\n'
+                '۴. روی میکروفون کیبورد بزنید و صحبت کنید — متن در همان فیلد درج می‌شود.',
           ),
-          _Section(
+          FilledButton.icon(
+            onPressed: _openImeSettings,
+            icon: const Icon(Icons.keyboard),
+            label: const Text('باز کردن تنظیمات کیبورد'),
+          ),
+          const SizedBox(height: 20),
+          const _Section(
             title: 'تغییر زبان',
             body:
-                'از منوی بالا (سه نقطه) گزینه «زبان» را انتخاب کنید یا روی نوار زبان در صفحه اصلی بزنید و فارسی یا انگلیسی را انتخاب کنید.',
+                'در اپ از منو یا نوار زبان استفاده کنید. روی کیبورد سیستم دکمه FA/EN را بزنید.',
           ),
-          _Section(
+          const _Section(
             title: 'دسترسی‌پذیری',
             body:
-                'اپ با TalkBack هماهنگ است. دکمه‌ها برچسب صوتی دارند. دکمه میکروفون بزرگ طراحی شده تا استفاده برای افراد کم‌بینا و نابینا راحت‌تر باشد.',
+                'دکمه‌ها برچسب TalkBack دارند. دکمه میکروفون بزرگ است. کیبورد سیستم هم برچسب‌های دسترس‌پذیر دارد.',
           ),
-          _Section(
-            title: 'مجوز میکروفون',
+          const _Section(
+            title: 'نکته',
             body:
-                'برای ضبط صدا باید مجوز میکروفون را بدهید. اگر دکمه غیرفعال بود، از تنظیمات گوشی مجوز را فعال کنید.',
-          ),
-          _Section(
-            title: 'نکته مهم',
-            body:
-                'در نسخه فعلی متن نمونه نمایش داده می‌شود. اتصال کامل موتور تشخیص گفتار واقعی در به‌روزرسانی‌های بعدی اضافه خواهد شد.',
+                'تشخیص داخل اپ با مدل آفلاین Vosk است. روی کیبورد سیستم از موتور تشخیص گفتار سیستم اندروید استفاده می‌شود (برای فارسی/انگلیسی بسته به گوشی).',
           ),
         ],
       ),

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.offlinevoicetyping.offline_voice_typing.MainActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+
+    <subtype
+        android:label="تایپ صوتی فارسی"
+        android:imeSubtypeLocale="fa_IR"
+        android:languageTag="fa-IR"
+        android:imeSubtypeMode="keyboard"
+        android:isAsciiCapable="false" />
+
+    <subtype
+        android:label="Voice Typing English"
+        android:imeSubtypeLocale="en_US"
+        android:languageTag="en-US"
+        android:imeSubtypeMode="keyboard"
+        android:isAsciiCapable="true" />
+</input-method>
