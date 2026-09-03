@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -14,11 +14,11 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.1'
+          flutter-version: "3.27.1"
           channel: stable
           cache: true
 
@@ -47,18 +47,26 @@ jobs:
             sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
           if ! grep -q VoiceTypingIME "$MANIFEST"; then
-            python3 -c "
-from pathlib import Path
-p=Path('android/app/src/main/AndroidManifest.xml')
-t=p.read_text()
-s='''
-        <service android:name=\".VoiceTypingIME\" android:label=\"تایپ صوتی آفلاین\" android:permission=\"android.permission.BIND_INPUT_METHOD\" android:exported=\"true\">
-            <intent-filter><action android:name=\"android.view.InputMethod\" /></intent-filter>
-            <meta-data android:name=\"android.view.im\" android:resource=\"@xml/method\" />
-        </service>
-'''
-p.write_text(t.replace('</application>', s+'\n    </application>'))
-"
+            python3 <<'PY'
+          from pathlib import Path
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          t = p.read_text()
+          s = """
+                  <service
+                      android:name=".VoiceTypingIME"
+                      android:label="Offline Voice Typing"
+                      android:permission="android.permission.BIND_INPUT_METHOD"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.view.InputMethod" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.view.im"
+                          android:resource="@xml/method" />
+                  </service>
+          """
+          p.write_text(t.replace("</application>", s + "\n    </application>"))
+          PY
           fi
 
       - name: Download Vosk models
@@ -76,13 +84,12 @@ p.write_text(t.replace('</application>', s+'\n    </application>'))
       - name: Fix vosk_flutter namespace
         run: |
           set -e
-          for f in $(find "$HOME/.pub-cache" -path '*vosk_flutter*/android/build.gradle' 2>/dev/null); do
+          for f in $(find "$HOME/.pub-cache" -path "*vosk_flutter*/android/build.gradle" 2>/dev/null); do
             echo "Found $f"
             if ! grep -q namespace "$f"; then
               sed -i '/android {/a\    namespace "org.vosk.vosk_flutter"' "$f"
             fi
             sed -i 's/compileSdkVersion [0-9][0-9]*/compileSdkVersion 34/' "$f" || true
-            echo "--- patched ---"
             head -40 "$f"
           done
 
