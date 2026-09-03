@@ -96,6 +96,47 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Patch vosk_flutter namespace for AGP 8+
+        run: |
+          set -e
+          # پیدا کردن build.gradle پلاگین vosk_flutter در pub-cache
+          find "$PUB_CACHE" "$HOME/.pub-cache" -type f -path "*vosk_flutter*/android/build.gradle" 2>/dev/null | while read -r f; do
+            echo "Patching $f"
+            if ! grep -q "namespace" "$f"; then
+              # بعد از android { namespace اضافه کن
+              sed -i '/^android {/a\    namespace "org.vosk.vosk_flutter"' "$f" || true
+            fi
+            # compileSdk را بالا ببر اگر خیلی پایین است
+            sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' "$f" || true
+            cat "$f"
+          done
+
+          # همچنین در android/build.gradle پروژه یک subprojects patch
+          if [ -f android/build.gradle ]; then
+            cat >> android/build.gradle << 'EOF'
+
+subprojects { subproject ->
+    subproject.afterEvaluate {
+        if (subproject.plugins.hasPlugin("com.android.library") || subproject.plugins.hasPlugin("com.android.application")) {
+            if (subproject.android.namespace == null || subproject.android.namespace.isEmpty()) {
+                def manifest = subproject.file("src/main/AndroidManifest.xml")
+                if (manifest.exists()) {
+                    def m = manifest.getText("UTF-8") =~ /package="([^"]+)"/
+                    if (m.find()) {
+                        subproject.android.namespace = m.group(1)
+                        println "Set namespace for ${subproject.name}: ${m.group(1)}"
+                    }
+                }
+                if (subproject.name.contains("vosk")) {
+                    subproject.android.namespace = "org.vosk.vosk_flutter"
+                }
+            }
+        }
+    }
+}
+EOF
+          fi
+
       - name: Build APK
         run: flutter build apk --release
 
