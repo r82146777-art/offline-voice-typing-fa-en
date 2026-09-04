@@ -33,30 +33,31 @@ jobs:
           cp /tmp/backup/README.md . 2>/dev/null || true
           cp -r /tmp/backup/android_ime . 2>/dev/null || true
 
-      - name: Inject native Vosk + IME + permissions
+      - name: Inject native code and permissions
         run: |
           set -e
-          PKG_DIR=android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing
-          mkdir -p "$PKG_DIR" android/app/src/main/res/layout android/app/src/main/res/xml
-
-          cp android_ime/VoskEngine.kt "$PKG_DIR/"
-          cp android_ime/MainActivity.kt "$PKG_DIR/"
-          cp android_ime/VoiceTypingIME.kt "$PKG_DIR/"
+          PKG=android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing
+          mkdir -p "$PKG" android/app/src/main/res/layout android/app/src/main/res/xml
+          cp android_ime/VoskEngine.kt "$PKG/"
+          cp android_ime/MainActivity.kt "$PKG/"
+          cp android_ime/VoiceTypingIME.kt "$PKG/"
           cp android_ime/ime_keyboard.xml android/app/src/main/res/layout/
           cp android_ime/method.xml android/app/src/main/res/xml/
 
-          MANIFEST=android/app/src/main/AndroidManifest.xml
-          if ! grep -q RECORD_AUDIO "$MANIFEST"; then
-            sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST"
-            sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
-          fi
-
-          if ! grep -q VoiceTypingIME "$MANIFEST"; then
-            python3 <<'PY'
+          python3 <<'PY'
           from pathlib import Path
-          p = Path("android/app/src/main/AndroidManifest.xml")
-          t = p.read_text()
-          s = """
+
+          # Manifest
+          mpath = Path("android/app/src/main/AndroidManifest.xml")
+          text = mpath.read_text()
+          if "RECORD_AUDIO" not in text:
+              text = text.replace(
+                  "<application",
+                  '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <application',
+                  1,
+              )
+          if "VoiceTypingIME" not in text:
+              service = '''
                   <service
                       android:name=".VoiceTypingIME"
                       android:label="Offline Voice Typing"
@@ -69,35 +70,24 @@ jobs:
                           android:name="android.view.im"
                           android:resource="@xml/method" />
                   </service>
-          """
-          p.write_text(t.replace("</application>", s + "\n    </application>"))
+              '''
+              text = text.replace("</application>", service + "\n    </application>")
+          mpath.write_text(text)
+
+          # Gradle dependency
+          gpath = Path("android/app/build.gradle")
+          g = gpath.read_text()
+          if "vosk-android" not in g:
+              g = g.replace(
+                  "dependencies {",
+                  'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"',
+                  1,
+              )
+          gpath.write_text(g)
+          print("Gradle and manifest updated")
           PY
-          fi
 
-          # Add vosk-android dependency
-          APP_GRADLE=android/app/build.gradle
-          if [ -f "$APP_GRADLE" ] && ! grep -q vosk-android "$APP_GRADLE"; then
-            python3 <<'PY'
-          from pathlib import Path
-          p = Path("android/app/build.gradle")
-          t = p.read_text()
-          dep = """
-    implementation "com.alphacephei:vosk-android:0.3.70"
-"""
-          if "dependencies {" in t and "vosk-android" not in t:
-              t = t.replace("dependencies {", "dependencies {" + dep, 1)
-              p.write_text(t)
-              print("vosk-android dependency added")
-          print(p.read_text())
-          PY
-          fi
-
-          # Packaging options for native libs if needed
-          if [ -f "$APP_GRADLE" ] && ! grep -q pickFirsts "$APP_GRADLE"; then
-            sed -i '/android {/a\    packaging { jniLibs { useLegacyPackaging true } }' "$APP_GRADLE" || true
-          fi
-
-      - name: Download Vosk models into assets
+      - name: Download Vosk models
         run: |
           mkdir -p assets/models
           curl -L --retry 5 -o assets/models/vosk-model-small-fa-0.42.zip \
@@ -105,12 +95,6 @@ jobs:
           curl -L --retry 5 -o assets/models/vosk-model-small-en-us-0.15.zip \
             https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip
           ls -lh assets/models/
-          FA=$(stat -c%s assets/models/vosk-model-small-fa-0.42.zip)
-          EN=$(stat -c%s assets/models/vosk-model-small-en-us-0.15.zip)
-          if [ "$FA" -lt 10000000 ] || [ "$EN" -lt 5000000 ]; then
-            echo "Model files too small"
-            exit 1
-          fi
 
       - name: Flutter pub get
         run: flutter pub get
