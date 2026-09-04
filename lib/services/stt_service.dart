@@ -8,7 +8,7 @@ enum SttLanguage { persian, english }
 
 enum SttState { idle, initializing, listening, processing, error }
 
-/// تشخیص گفتار کاملاً آفلاین با Vosk
+/// تشخیص گفتار آفلاین با Vosk — مقداردهی تنبل تا از کرش استارت جلوگیری شود.
 class SttService extends ChangeNotifier {
   SttState _state = SttState.idle;
   SttLanguage _language = SttLanguage.persian;
@@ -16,8 +16,9 @@ class SttService extends ChangeNotifier {
   String _finalText = '';
   String? _errorMessage;
   bool _modelReady = false;
+  bool _initInProgress = false;
 
-  final VoskFlutterPlugin _vosk = VoskFlutterPlugin.instance();
+  VoskFlutterPlugin? _vosk;
   Model? _model;
   Recognizer? _recognizer;
   SpeechService? _speechService;
@@ -47,14 +48,11 @@ class SttService extends ChangeNotifier {
     }
   }
 
-  void setModelReady(bool ready) {
-    _modelReady = ready;
-    notifyListeners();
-  }
-
   Future<void> ensureEngineReady() async {
     if (_speechService != null && _modelReady) return;
+    if (_initInProgress) return;
 
+    _initInProgress = true;
     _state = SttState.initializing;
     _errorMessage = null;
     notifyListeners();
@@ -75,12 +73,20 @@ class SttService extends ChangeNotifier {
         throw Exception('مسیر مدل پیدا نشد');
       }
 
-      _model = await _vosk.createModel(modelPath);
-      _recognizer = await _vosk.createRecognizer(
+      // کمی صبر تا بعد از دیالوگ مجوز، Activity پایدار شود
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      _vosk ??= VoskFlutterPlugin.instance();
+
+      // اگر قبلاً نیمه‌آماده مانده، پاک کن
+      _disposeEngine(keepLanguage: true);
+
+      _model = await _vosk!.createModel(modelPath);
+      _recognizer = await _vosk!.createRecognizer(
         model: _model!,
         sampleRate: 16000,
       );
-      _speechService = await _vosk.initSpeechService(_recognizer!);
+      _speechService = await _vosk!.initSpeechService(_recognizer!);
 
       await _partialSub?.cancel();
       await _resultSub?.cancel();
@@ -110,20 +116,24 @@ class SttService extends ChangeNotifier {
 
       _modelReady = true;
       _state = SttState.idle;
+      _errorMessage = null;
       notifyListeners();
     } catch (e, st) {
       debugPrint('STT init error: $e\n$st');
       _errorMessage = e.toString();
       _state = SttState.error;
       _modelReady = false;
+      _disposeEngine(keepLanguage: true);
       notifyListeners();
+    } finally {
+      _initInProgress = false;
     }
   }
 
   Future<void> startListening() async {
     if (_state == SttState.listening) return;
     try {
-      if (_speechService == null) {
+      if (_speechService == null || !_modelReady) {
         await ensureEngineReady();
       }
       if (_speechService == null) {
@@ -172,7 +182,7 @@ class SttService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _disposeEngine() {
+  void _disposeEngine({bool keepLanguage = false}) {
     _partialSub?.cancel();
     _resultSub?.cancel();
     _partialSub = null;
@@ -183,6 +193,9 @@ class SttService extends ChangeNotifier {
     _speechService = null;
     _recognizer = null;
     _model = null;
+    if (!keepLanguage) {
+      _modelReady = false;
+    }
   }
 
   @override

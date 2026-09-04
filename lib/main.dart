@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,12 +10,23 @@ import 'services/tts_service.dart';
 import 'services/model_downloader.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  runApp(const OfflineVoiceTypingApp());
+  runZonedGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      debugPrint('FlutterError: ${details.exceptionAsString()}');
+    };
+
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+
+    runApp(const OfflineVoiceTypingApp());
+  }, (error, stack) {
+    debugPrint('Uncaught zone error: $error\n$stack');
+  });
 }
 
 class OfflineVoiceTypingApp extends StatelessWidget {
@@ -47,6 +60,22 @@ class OfflineVoiceTypingApp extends StatelessWidget {
           ),
           fontFamily: 'sans-serif',
         ),
+        builder: (context, child) {
+          ErrorWidget.builder = (details) {
+            return Material(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'خطای نمایش:\n${details.exceptionAsString()}',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            );
+          };
+          return child ?? const SizedBox.shrink();
+        },
         home: const HomeScreen(),
       ),
     );

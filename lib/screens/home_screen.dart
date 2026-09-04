@@ -19,41 +19,56 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final TextEditingController _textController = TextEditingController();
   bool _dontShowInviteAgain = false;
-  bool _bootstrapping = true;
+  bool _bootstrapping = false;
+  bool _inviteShown = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _bootstrap();
+      // فقط اتصال downloader — بدون درخواست مجوز و بدون Vosk در استارت
+      final downloader = context.read<ModelDownloader>();
+      final stt = context.read<SttService>();
+      stt.attachDownloader(downloader);
+
+      // استخراج سبک مدل در پس‌زمینه (بدون native init)
+      setState(() => _bootstrapping = true);
+      try {
+        await downloader.ensureModel(stt.langCode);
+      } catch (e) {
+        debugPrint('Background model prep: $e');
+      }
+      if (mounted) setState(() => _bootstrapping = false);
+
       await _maybeShowInviteDialog();
     });
   }
 
-  Future<void> _bootstrap() async {
-    final downloader = context.read<ModelDownloader>();
-    final stt = context.read<SttService>();
-    stt.attachDownloader(downloader);
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _textController.dispose();
+    super.dispose();
+  }
 
-    await Permission.microphone.request();
-
-    try {
-      await downloader.ensureModel(stt.langCode);
-      await stt.ensureEngineReady();
-    } catch (e) {
-      debugPrint('Bootstrap: $e');
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // بعد از بستن دیالوگ مجوز، اپ را دوباره کرش‌آماده نکن
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('App resumed');
     }
-
-    if (mounted) setState(() => _bootstrapping = false);
   }
 
   Future<void> _maybeShowInviteDialog() async {
+    if (_inviteShown || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
     final hide = prefs.getBool('hide_hamdel_invite') ?? false;
     if (hide || !mounted) return;
+    _inviteShown = true;
 
     await showDialog(
       context: context,
@@ -145,9 +160,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (selected != null && selected != stt.language) {
       stt.setLanguage(selected);
+      if (!mounted) return;
       setState(() => _bootstrapping = true);
-      await downloader.ensureModel(selected == SttLanguage.persian ? 'fa' : 'en');
-      await stt.ensureEngineReady();
+      try {
+        await downloader.ensureModel(
+          selected == SttLanguage.persian ? 'fa' : 'en',
+        );
+      } catch (e) {
+        debugPrint('Lang switch model: $e');
+      }
       if (mounted) setState(() => _bootstrapping = false);
     }
   }
@@ -167,33 +188,61 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _onMicPressed() async {
     final stt = context.read<SttService>();
-    var status = await Permission.microphone.status;
-    if (!status.isGranted) {
-      status = await Permission.microphone.request();
-    }
-    if (!status.isGranted) {
+
+    try {
+      // مجوز فقط اینجا — نه در استارت اپ
+      var status = await Permission.microphone.status;
+      if (!status.isGranted) {
+        status = await Permission.microphone.request();
+      }
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('مجوز میکروفون لازم است'),
+              action: SnackBarAction(
+                label: 'تنظیمات',
+                onPressed: openAppSettings,
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      // بعد از دیالوگ مجوز کمی صبر کن تا Activity پایدار شود
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+
+      if (stt.isListening) {
+        await stt.stopListening();
+      } else {
+        if (mounted) setState(() => _bootstrapping = true);
+        await stt.ensureEngineReady();
+        if (mounted) setState(() => _bootstrapping = false);
+
+        if (stt.state == SttState.error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  stt.errorMessage ?? 'خطا در آماده‌سازی موتور آفلاین',
+                ),
+              ),
+            );
+          }
+          return;
+        }
+        await stt.startListening();
+      }
+    } catch (e) {
+      debugPrint('Mic press error: $e');
       if (mounted) {
+        setState(() => _bootstrapping = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('مجوز میکروفون لازم است'),
-            action: SnackBarAction(label: 'تنظیمات', onPressed: openAppSettings),
-          ),
+          SnackBar(content: Text('خطا: $e')),
         );
       }
-      return;
     }
-
-    if (stt.isListening) {
-      await stt.stopListening();
-    } else {
-      await stt.startListening();
-    }
-  }
-
-  @override
-  void dispose() {
-    _textController.dispose();
-    super.dispose();
   }
 
   @override
@@ -208,11 +257,17 @@ class _HomeScreenState extends State<HomeScreen> {
             ? (stt.finalText.isEmpty ? stt.partialText : ' ${stt.partialText}')
             : '');
 
+    // به‌روزرسانی کنترلر خارج از فاز build خالص
     if (_textController.text != displayText) {
-      _textController.text = displayText;
-      _textController.selection = TextSelection.fromPosition(
-        TextPosition(offset: _textController.text.length),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_textController.text != displayText) {
+          _textController.value = TextEditingValue(
+            text: displayText,
+            selection: TextSelection.collapsed(offset: displayText.length),
+          );
+        }
+      });
     }
 
     final preparing = _bootstrapping ||
@@ -241,13 +296,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _openImeSettings();
                 case 'help':
                   if (mounted) {
-                    Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const HelpScreen()));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const HelpScreen()),
+                    );
                   }
                 case 'about':
                   if (mounted) {
-                    Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const AboutScreen()));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AboutScreen()),
+                    );
                   }
               }
             },
@@ -296,7 +355,11 @@ class _HomeScreenState extends State<HomeScreen> {
               if (preparing) ...[
                 const LinearProgressIndicator(),
                 const SizedBox(height: 8),
-                const Text('در حال آماده‌سازی موتور آفلاین Vosk...'),
+                Text(
+                  downloader.status == DownloadStatus.extracting
+                      ? 'در حال آماده‌سازی مدل آفلاین...'
+                      : 'در حال آماده‌سازی موتور...',
+                ),
                 const SizedBox(height: 12),
               ],
               if (downloader.status == DownloadStatus.error ||
@@ -319,8 +382,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       FilledButton(
                         onPressed: () async {
                           setState(() => _bootstrapping = true);
-                          await downloader.retryCurrent();
-                          await stt.ensureEngineReady();
+                          try {
+                            await downloader.retryCurrent();
+                            await stt.ensureEngineReady();
+                          } catch (e) {
+                            debugPrint('Retry: $e');
+                          }
                           if (mounted) setState(() => _bootstrapping = false);
                         },
                         child: const Text('تلاش مجدد'),
@@ -334,10 +401,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest.withOpacity(0.45),
+                    color:
+                        colorScheme.surfaceContainerHighest.withOpacity(0.45),
                     borderRadius: BorderRadius.circular(20),
-                    border:
-                        Border.all(color: colorScheme.outline.withOpacity(0.25)),
+                    border: Border.all(
+                      color: colorScheme.outline.withOpacity(0.25),
+                    ),
                   ),
                   child: TextField(
                     controller: _textController,
@@ -346,9 +415,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     textAlignVertical: TextAlignVertical.top,
                     style: theme.textTheme.titleLarge
                         ?.copyWith(height: 1.55, fontSize: 19),
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       border: InputBorder.none,
-                      hintText: 'متن آفلاین اینجا ظاهر می‌شود...\nمیکروفون را بزنید و صحبت کنید',
+                      hintText:
+                          'متن آفلاین اینجا ظاهر می‌شود...\nمیکروفون را بزنید و صحبت کنید',
                     ),
                   ),
                 ),
@@ -359,7 +429,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? 'در حال آماده‌سازی...'
                     : stt.isListening
                         ? 'در حال گوش دادن (آفلاین)...'
-                        : (stt.modelReady ? 'آماده — کاملاً آفلاین' : 'مدل آماده نیست'),
+                        : (stt.modelReady
+                            ? 'آماده — کاملاً آفلاین'
+                            : 'میکروفون را بزنید'),
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: colorScheme.primary,
                   fontWeight: FontWeight.w600,
@@ -368,8 +440,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               BigMicButton(
                 isListening: stt.isListening,
-                enabled: true,
-                onPressed: _onMicPressed,
+                enabled: !preparing || stt.isListening,
+                onPressed: preparing && !stt.isListening ? null : _onMicPressed,
               ).animate().scale(duration: 350.ms, curve: Curves.easeOutBack),
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -379,7 +451,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'مدل‌ها داخل اپ هستند — نیازی به اینترنت نیست.',
+                'مدل‌ها داخل اپ هستند — نیازی به اینترنت نیست.\nمجوز میکروفون فقط هنگام ضبط خواسته می‌شود.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurface.withOpacity(0.7),
                 ),

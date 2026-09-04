@@ -6,12 +6,13 @@ import 'package:archive/archive.dart';
 
 enum DownloadStatus { idle, checking, extracting, ready, error }
 
-/// مدل‌های Vosk داخل APK هستند و فقط یک‌بار به حافظه داخلی استخراج می‌شوند.
+/// مدل‌های Vosk داخل APK هستند و فقط یک‌بار استخراج می‌شوند.
 class ModelDownloader extends ChangeNotifier {
   DownloadStatus status = DownloadStatus.idle;
   double progress = 0.0;
   String? errorMessage;
   String? currentLanguage;
+  bool _busy = false;
 
   static const _models = {
     'fa': {
@@ -33,21 +34,37 @@ class ModelDownloader extends ChangeNotifier {
     return models.path;
   }
 
-  Future<bool> isModelReady(String lang) async {
-    final base = await modelsDir;
-    final folder = _models[lang]!['folder']!;
-    return File('$base/$folder/am/final.mdl').exists();
-  }
-
-  Future<String?> getModelPath(String lang) async {
-    if (await isModelReady(lang)) {
-      final base = await modelsDir;
-      return '$base/${_models[lang]!['folder']}';
+  Future<String?> _findModelRoot(String base, String preferredFolder) async {
+    final preferred = Directory('$base/$preferredFolder');
+    if (await File('${preferred.path}/am/final.mdl').exists()) {
+      return preferred.path;
     }
+    // جستجوی بازگشتی اگر ساختار زیپ متفاوت بود
+    try {
+      await for (final entity in Directory(base).list(recursive: true)) {
+        if (entity is File && entity.path.endsWith('/am/final.mdl')) {
+          return entity.parent.parent.path;
+        }
+      }
+    } catch (_) {}
     return null;
   }
 
+  Future<bool> isModelReady(String lang) async {
+    final base = await modelsDir;
+    final folder = _models[lang]!['folder']!;
+    final root = await _findModelRoot(base, folder);
+    return root != null;
+  }
+
+  Future<String?> getModelPath(String lang) async {
+    final base = await modelsDir;
+    final folder = _models[lang]!['folder']!;
+    return _findModelRoot(base, folder);
+  }
+
   Future<void> ensureModel(String lang) async {
+    if (_busy) return;
     if (await isModelReady(lang)) {
       status = DownloadStatus.ready;
       errorMessage = null;
@@ -55,9 +72,10 @@ class ModelDownloader extends ChangeNotifier {
       return;
     }
 
+    _busy = true;
     status = DownloadStatus.extracting;
     currentLanguage = lang;
-    progress = 0.1;
+    progress = 0.05;
     errorMessage = null;
     notifyListeners();
 
@@ -66,28 +84,55 @@ class ModelDownloader extends ChangeNotifier {
       final folderName = _models[lang]!['folder']!;
       final base = await modelsDir;
 
-      final byteData = await rootBundle.load(assetPath);
-      final bytes = byteData.buffer.asUint8List();
+      // کپی به فایل موقت به‌جای نگه‌داشتن کل زیپ در RAM به‌صورت همزمان
+      final tmpZip = File('$base/$folderName.zip');
+      final data = await rootBundle.load(assetPath);
+      progress = 0.25;
+      notifyListeners();
+
+      await tmpZip.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        flush: true,
+      );
       progress = 0.4;
       notifyListeners();
 
-      final archive = ZipDecoder().decodeBytes(bytes);
-      progress = 0.6;
+      final bytes = await tmpZip.readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes, verify: false);
+      progress = 0.55;
       notifyListeners();
 
+      var i = 0;
+      final total = archive.length.clamp(1, 1000000);
       for (final entry in archive) {
-        final filename = '$base/${entry.name}';
+        final name = entry.name.replaceAll('\\', '/');
+        final outPath = '$base/$name';
         if (entry.isFile) {
-          final outFile = File(filename);
+          final outFile = File(outPath);
           await outFile.parent.create(recursive: true);
-          await outFile.writeAsBytes(entry.content as List<int>);
+          final content = entry.content;
+          if (content is List<int>) {
+            await outFile.writeAsBytes(content, flush: false);
+          }
         } else {
-          await Directory(filename).create(recursive: true);
+          await Directory(outPath).create(recursive: true);
+        }
+        i++;
+        if (i % 20 == 0) {
+          progress = 0.55 + (0.4 * i / total);
+          notifyListeners();
+          // اجازه تنفس به UI
+          await Future<void>.delayed(Duration.zero);
         }
       }
 
-      if (!await File('$base/$folderName/am/final.mdl').exists()) {
-        throw Exception('فایل مدل بعد از استخراج پیدا نشد');
+      try {
+        if (await tmpZip.exists()) await tmpZip.delete();
+      } catch (_) {}
+
+      final root = await _findModelRoot(base, folderName);
+      if (root == null) {
+        throw Exception('فایل مدل (am/final.mdl) بعد از استخراج پیدا نشد');
       }
 
       status = DownloadStatus.ready;
@@ -99,6 +144,8 @@ class ModelDownloader extends ChangeNotifier {
       status = DownloadStatus.error;
       errorMessage = 'خطا در آماده‌سازی مدل آفلاین:\n$e';
       notifyListeners();
+    } finally {
+      _busy = false;
     }
   }
 
