@@ -30,12 +30,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // فقط اتصال downloader — بدون درخواست مجوز و بدون Vosk در استارت
       final downloader = context.read<ModelDownloader>();
       final stt = context.read<SttService>();
       stt.attachDownloader(downloader);
 
-      // استخراج سبک مدل در پس‌زمینه (بدون native init)
       setState(() => _bootstrapping = true);
       try {
         await downloader.ensureModel(stt.langCode);
@@ -57,7 +55,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // بعد از بستن دیالوگ مجوز، اپ را دوباره کرش‌آماده نکن
     if (state == AppLifecycleState.resumed) {
       debugPrint('App resumed');
     }
@@ -190,7 +187,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final stt = context.read<SttService>();
 
     try {
-      // مجوز فقط اینجا — نه در استارت اپ
       var status = await Permission.microphone.status;
       if (!status.isGranted) {
         status = await Permission.microphone.request();
@@ -210,7 +206,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // بعد از دیالوگ مجوز کمی صبر کن تا Activity پایدار شود
       await Future<void>.delayed(const Duration(milliseconds: 400));
 
       if (stt.isListening) {
@@ -257,7 +252,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? (stt.finalText.isEmpty ? stt.partialText : ' ${stt.partialText}')
             : '');
 
-    // به‌روزرسانی کنترلر خارج از فاز build خالص
     if (_textController.text != displayText) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -441,7 +435,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               BigMicButton(
                 isListening: stt.isListening,
                 enabled: !preparing || stt.isListening,
-                onPressed: preparing && !stt.isListening ? null : _onMicPressed,
+                onPressed: _onMicPressed,
               ).animate().scale(duration: 350.ms, curve: Curves.easeOutBack),
               const SizedBox(height: 12),
               OutlinedButton.icon(
