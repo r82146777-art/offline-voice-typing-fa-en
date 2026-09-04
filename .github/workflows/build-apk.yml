@@ -47,7 +47,6 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          # Manifest
           mpath = Path("android/app/src/main/AndroidManifest.xml")
           text = mpath.read_text()
           if "RECORD_AUDIO" not in text:
@@ -74,17 +73,32 @@ jobs:
               text = text.replace("</application>", service + "\n    </application>")
           mpath.write_text(text)
 
-          # Gradle dependency
-          gpath = Path("android/app/build.gradle")
-          g = gpath.read_text()
-          if "vosk-android" not in g:
-              g = g.replace(
-                  "dependencies {",
-                  'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"',
-                  1,
-              )
-          gpath.write_text(g)
-          print("Gradle and manifest updated")
+          # Support both Groovy and Kotlin DSL gradle files
+          for name in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
+              gpath = Path(name)
+              if not gpath.exists():
+                  continue
+              g = gpath.read_text()
+              if "vosk-android" in g:
+                  print(f"already has vosk in {name}")
+                  continue
+              if name.endswith(".kts"):
+                  needle = "dependencies {"
+                  insert = 'dependencies {\n    implementation("com.alphacephei:vosk-android:0.3.70")'
+                  if needle in g:
+                      g = g.replace(needle, insert, 1)
+                  else:
+                      g += '\ndependencies {\n    implementation("com.alphacephei:vosk-android:0.3.70")\n}\n'
+              else:
+                  needle = "dependencies {"
+                  insert = 'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"'
+                  if needle in g:
+                      g = g.replace(needle, insert, 1)
+                  else:
+                      g += '\ndependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"\n}\n'
+              gpath.write_text(g)
+              print(f"Added vosk-android to {name}")
+              print(gpath.read_text()[-800:])
           PY
 
       - name: Download Vosk models
