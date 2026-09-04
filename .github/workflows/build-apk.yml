@@ -33,19 +33,24 @@ jobs:
           cp /tmp/backup/README.md . 2>/dev/null || true
           cp -r /tmp/backup/android_ime . 2>/dev/null || true
 
-      - name: Inject IME and permissions
+      - name: Inject native Vosk + IME + permissions
         run: |
           set -e
           PKG_DIR=android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing
           mkdir -p "$PKG_DIR" android/app/src/main/res/layout android/app/src/main/res/xml
+
+          cp android_ime/VoskEngine.kt "$PKG_DIR/"
+          cp android_ime/MainActivity.kt "$PKG_DIR/"
           cp android_ime/VoiceTypingIME.kt "$PKG_DIR/"
           cp android_ime/ime_keyboard.xml android/app/src/main/res/layout/
           cp android_ime/method.xml android/app/src/main/res/xml/
+
           MANIFEST=android/app/src/main/AndroidManifest.xml
           if ! grep -q RECORD_AUDIO "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST"
             sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
+
           if ! grep -q VoiceTypingIME "$MANIFEST"; then
             python3 <<'PY'
           from pathlib import Path
@@ -69,7 +74,30 @@ jobs:
           PY
           fi
 
-      - name: Download Vosk models
+          # Add vosk-android dependency
+          APP_GRADLE=android/app/build.gradle
+          if [ -f "$APP_GRADLE" ] && ! grep -q vosk-android "$APP_GRADLE"; then
+            python3 <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle")
+          t = p.read_text()
+          dep = """
+    implementation "com.alphacephei:vosk-android:0.3.70"
+"""
+          if "dependencies {" in t and "vosk-android" not in t:
+              t = t.replace("dependencies {", "dependencies {" + dep, 1)
+              p.write_text(t)
+              print("vosk-android dependency added")
+          print(p.read_text())
+          PY
+          fi
+
+          # Packaging options for native libs if needed
+          if [ -f "$APP_GRADLE" ] && ! grep -q pickFirsts "$APP_GRADLE"; then
+            sed -i '/android {/a\    packaging { jniLibs { useLegacyPackaging true } }' "$APP_GRADLE" || true
+          fi
+
+      - name: Download Vosk models into assets
         run: |
           mkdir -p assets/models
           curl -L --retry 5 -o assets/models/vosk-model-small-fa-0.42.zip \
@@ -77,21 +105,15 @@ jobs:
           curl -L --retry 5 -o assets/models/vosk-model-small-en-us-0.15.zip \
             https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip
           ls -lh assets/models/
+          FA=$(stat -c%s assets/models/vosk-model-small-fa-0.42.zip)
+          EN=$(stat -c%s assets/models/vosk-model-small-en-us-0.15.zip)
+          if [ "$FA" -lt 10000000 ] || [ "$EN" -lt 5000000 ]; then
+            echo "Model files too small"
+            exit 1
+          fi
 
       - name: Flutter pub get
         run: flutter pub get
-
-      - name: Fix vosk_flutter namespace
-        run: |
-          set -e
-          for f in $(find "$HOME/.pub-cache" -path "*vosk_flutter*/android/build.gradle" 2>/dev/null); do
-            echo "Found $f"
-            if ! grep -q namespace "$f"; then
-              sed -i '/android {/a\    namespace "org.vosk.vosk_flutter"' "$f"
-            fi
-            sed -i 's/compileSdkVersion [0-9][0-9]*/compileSdkVersion 34/' "$f" || true
-            head -40 "$f"
-          done
 
       - name: Build release APK
         run: flutter build apk --release

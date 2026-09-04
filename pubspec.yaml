@@ -1,7 +1,7 @@
 name: offline_voice_typing
-description: Fully offline voice typing (Vosk) for Persian and English with system IME.
+description: Fully offline voice typing (native Vosk) for Persian and English with system IME.
 publish_to: 'none'
-version: 0.6.0+9
+version: 0.7.0+10
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -11,24 +11,18 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   path_provider: ^2.1.4
-  permission_handler: ^10.4.5
+  permission_handler: ^11.3.1
   archive: ^3.6.1
   provider: ^6.1.2
   flutter_animate: ^4.5.0
   shared_preferences: ^2.2.3
   url_launcher: ^6.2.6
   android_intent_plus: ^5.1.0
-  vosk_flutter: ^0.3.48
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
-
-dependency_overrides:
-  # vosk_flutter هنوز روی http قدیمی است
-  http: ^0.13.6
-  permission_handler: ^10.4.5
 
 flutter:
   uses-material-design: true

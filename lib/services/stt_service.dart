@@ -1,15 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:vosk_flutter/vosk_flutter.dart';
+import 'package:flutter/services.dart';
 import 'model_downloader.dart';
 
 enum SttLanguage { persian, english }
 
 enum SttState { idle, initializing, listening, processing, error }
 
-/// تشخیص گفتار آفلاین با Vosk — مقداردهی تنبل تا از کرش استارت جلوگیری شود.
+/// تشخیص گفتار آفلاین از طریق MethodChannel و موتور بومی Vosk
 class SttService extends ChangeNotifier {
+  static const _method = MethodChannel('offline_voice_typing/vosk');
+  static const _events = EventChannel('offline_voice_typing/vosk_events');
+
   SttState _state = SttState.idle;
   SttLanguage _language = SttLanguage.persian;
   String _partialText = '';
@@ -17,13 +19,7 @@ class SttService extends ChangeNotifier {
   String? _errorMessage;
   bool _modelReady = false;
   bool _initInProgress = false;
-
-  VoskFlutterPlugin? _vosk;
-  Model? _model;
-  Recognizer? _recognizer;
-  SpeechService? _speechService;
-  StreamSubscription? _partialSub;
-  StreamSubscription? _resultSub;
+  StreamSubscription? _eventSub;
   ModelDownloader? _downloader;
 
   SttState get state => _state;
@@ -42,14 +38,46 @@ class SttService extends ChangeNotifier {
   void setLanguage(SttLanguage lang) {
     if (_language != lang) {
       _language = lang;
-      _disposeEngine();
       _modelReady = false;
       notifyListeners();
     }
   }
 
+  Future<void> _ensureEventListen() async {
+    if (_eventSub != null) return;
+    _eventSub = _events.receiveBroadcastStream().listen((event) {
+      if (event is! Map) return;
+      final type = event['type']?.toString() ?? '';
+      final text = event['text']?.toString() ?? '';
+      switch (type) {
+        case 'partial':
+          _partialText = text;
+          notifyListeners();
+        case 'final':
+          if (text.trim().isNotEmpty) {
+            _finalText = _finalText.isEmpty ? text.trim() : '$_finalText ${text.trim()}';
+          }
+          _partialText = '';
+          notifyListeners();
+        case 'error':
+          _errorMessage = text;
+          _state = SttState.error;
+          notifyListeners();
+        case 'status':
+          if (text == 'listening') {
+            _state = SttState.listening;
+          } else if (text == 'idle' && _state == SttState.listening) {
+            _state = SttState.idle;
+          }
+          notifyListeners();
+      }
+    }, onError: (e) {
+      debugPrint('Vosk events error: $e');
+    });
+  }
+
   Future<void> ensureEngineReady() async {
-    if (_speechService != null && _modelReady) return;
+    if (_modelReady && !_initInProgress) return;
     if (_initInProgress) return;
 
     _initInProgress = true;
@@ -58,72 +86,28 @@ class SttService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final downloader = _downloader;
-      if (downloader == null) {
-        throw Exception('ModelDownloader متصل نیست');
+      await _ensureEventListen();
+
+      // استخراج مدل از سمت Dart (اختیاری) + آماده‌سازی native
+      try {
+        await _downloader?.ensureModel(langCode);
+      } catch (e) {
+        debugPrint('Dart model extract: $e');
       }
 
-      await downloader.ensureModel(langCode);
-      if (downloader.status == DownloadStatus.error) {
-        throw Exception(downloader.errorMessage ?? 'خطا در مدل');
+      final ok = await _method.invokeMethod<bool>('prepare', {'lang': langCode});
+      if (ok != true) {
+        throw Exception('آماده‌سازی موتور آفلاین ناموفق بود');
       }
-
-      final modelPath = await downloader.getModelPath(langCode);
-      if (modelPath == null) {
-        throw Exception('مسیر مدل پیدا نشد');
-      }
-
-      // کمی صبر تا بعد از دیالوگ مجوز، Activity پایدار شود
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-
-      _vosk ??= VoskFlutterPlugin.instance();
-
-      // اگر قبلاً نیمه‌آماده مانده، پاک کن
-      _disposeEngine(keepLanguage: true);
-
-      _model = await _vosk!.createModel(modelPath);
-      _recognizer = await _vosk!.createRecognizer(
-        model: _model!,
-        sampleRate: 16000,
-      );
-      _speechService = await _vosk!.initSpeechService(_recognizer!);
-
-      await _partialSub?.cancel();
-      await _resultSub?.cancel();
-
-      _partialSub = _speechService!.onPartial().listen((jsonStr) {
-        try {
-          final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-          final partial = (map['partial'] as String?) ?? '';
-          if (partial.isNotEmpty) {
-            _partialText = partial;
-            notifyListeners();
-          }
-        } catch (_) {}
-      });
-
-      _resultSub = _speechService!.onResult().listen((jsonStr) {
-        try {
-          final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-          final text = (map['text'] as String?)?.trim() ?? '';
-          if (text.isNotEmpty) {
-            _finalText = _finalText.isEmpty ? text : '$_finalText $text';
-            _partialText = '';
-            notifyListeners();
-          }
-        } catch (_) {}
-      });
 
       _modelReady = true;
       _state = SttState.idle;
-      _errorMessage = null;
       notifyListeners();
     } catch (e, st) {
       debugPrint('STT init error: $e\n$st');
       _errorMessage = e.toString();
       _state = SttState.error;
       _modelReady = false;
-      _disposeEngine(keepLanguage: true);
       notifyListeners();
     } finally {
       _initInProgress = false;
@@ -133,15 +117,17 @@ class SttService extends ChangeNotifier {
   Future<void> startListening() async {
     if (_state == SttState.listening) return;
     try {
-      if (_speechService == null || !_modelReady) {
+      await _ensureEventListen();
+      if (!_modelReady) {
         await ensureEngineReady();
       }
-      if (_speechService == null) {
-        throw Exception(_errorMessage ?? 'موتور آفلاین آماده نیست');
+      if (!_modelReady) {
+        throw Exception(_errorMessage ?? 'موتور آماده نیست');
       }
+
       _partialText = '';
       _errorMessage = null;
-      await _speechService!.start();
+      await _method.invokeMethod('start', {'lang': langCode});
       _state = SttState.listening;
       notifyListeners();
     } catch (e) {
@@ -156,7 +142,7 @@ class SttService extends ChangeNotifier {
     try {
       _state = SttState.processing;
       notifyListeners();
-      await _speechService?.stop();
+      await _method.invokeMethod('stop');
       if (_partialText.trim().isNotEmpty) {
         final t = _partialText.trim();
         _finalText = _finalText.isEmpty ? t : '$_finalText $t';
@@ -182,25 +168,12 @@ class SttService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _disposeEngine({bool keepLanguage = false}) {
-    _partialSub?.cancel();
-    _resultSub?.cancel();
-    _partialSub = null;
-    _resultSub = null;
-    try {
-      _speechService?.stop();
-    } catch (_) {}
-    _speechService = null;
-    _recognizer = null;
-    _model = null;
-    if (!keepLanguage) {
-      _modelReady = false;
-    }
-  }
-
   @override
   void dispose() {
-    _disposeEngine();
+    _eventSub?.cancel();
+    try {
+      _method.invokeMethod('stop');
+    } catch (_) {}
     super.dispose();
   }
 }
