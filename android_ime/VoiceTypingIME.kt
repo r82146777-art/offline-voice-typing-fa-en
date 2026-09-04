@@ -14,9 +14,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 
-/**
- * کیبورد سیستم با تشخیص گفتار آفلاین Vosk
- */
+/** Offline IME. Does not init Vosk until the user taps the mic. */
 class VoiceTypingIME : InputMethodService() {
 
     private var statusText: TextView? = null
@@ -26,7 +24,6 @@ class VoiceTypingIME : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val view = layoutInflater.inflate(R.layout.ime_keyboard, null)
-
         statusText = view.findViewById(R.id.ime_status)
         micButton = view.findViewById(R.id.ime_mic)
         val btnSpace = view.findViewById<Button>(R.id.ime_space)
@@ -41,16 +38,19 @@ class VoiceTypingIME : InputMethodService() {
             currentInputConnection?.deleteSurroundingText(1, 0)
         }
         btnEnter?.setOnClickListener {
-            currentInputConnection?.performEditorAction(EditorInfo.IME_ACTION_DONE)
-                ?: currentInputConnection?.commitText("\n", 1)
+            val ic = currentInputConnection
+            if (ic != null) {
+                if (!ic.performEditorAction(EditorInfo.IME_ACTION_DONE)) {
+                    ic.commitText("\n", 1)
+                }
+            }
         }
         btnLang?.setOnClickListener {
             languageFa = !languageFa
             btnLang.text = if (languageFa) "FA" else "EN"
-            statusText?.text = if (languageFa) "زبان: فارسی (آفلاین)" else "English (Offline)"
-            Thread {
-                VoskEngine.prepare(applicationContext, if (languageFa) "fa" else "en")
-            }.start()
+            statusText?.text =
+                if (languageFa) "فارسی آفلاین — میکروفون را بزنید"
+                else "English offline — tap mic"
         }
         btnSettings?.setOnClickListener {
             try {
@@ -61,18 +61,19 @@ class VoiceTypingIME : InputMethodService() {
             }
         }
 
-        statusText?.text = "آماده — آفلاین"
-        Thread {
-            VoskEngine.prepare(applicationContext, "fa")
-        }.start()
+        statusText?.text = "کیبورد آفلاین — میکروفون را بزنید"
         return view
     }
 
     private fun toggleListening() {
-        if (VoskEngine.isListening()) {
-            stopListening()
-        } else {
-            startListening()
+        try {
+            if (VoskEngine.isListening()) {
+                stopListening()
+            } else {
+                startListening()
+            }
+        } catch (t: Throwable) {
+            statusText?.text = "خطا: ${t.message}"
         }
     }
 
@@ -83,7 +84,7 @@ class VoiceTypingIME : InputMethodService() {
             statusText?.text = "مجوز میکروفون لازم است — اپ را باز کنید"
             Toast.makeText(
                 this,
-                "ابتدا اپ تایپ صوتی را باز کنید و مجوز میکروفون بدهید",
+                "ابتدا اپ تایپ صوتی آفلاین را باز کنید و مجوز میکروفون بدهید",
                 Toast.LENGTH_LONG
             ).show()
             try {
@@ -95,6 +96,7 @@ class VoiceTypingIME : InputMethodService() {
             return
         }
 
+        statusText?.text = "در حال آماده‌سازی مدل آفلاین..."
         VoskEngine.setListener(object : VoskEngine.Listener {
             override fun onPartial(text: String) {
                 mainHandler.post { statusText?.text = text }
@@ -104,7 +106,7 @@ class VoiceTypingIME : InputMethodService() {
                 mainHandler.post {
                     if (text.isNotBlank()) {
                         currentInputConnection?.commitText("$text ", 1)
-                        statusText?.text = "ثبت شد ✓"
+                        statusText?.text = "ثبت شد (آفلاین)"
                     }
                 }
             }
@@ -116,36 +118,45 @@ class VoiceTypingIME : InputMethodService() {
             override fun onStatus(status: String) {
                 mainHandler.post {
                     if (status == "listening") {
-                        statusText?.text = if (languageFa) "گوش می‌دهم (آفلاین)..." else "Listening (offline)..."
+                        statusText?.text =
+                            if (languageFa) "گوش می‌دهم — آفلاین"
+                            else "Listening — offline"
                         micButton?.isSelected = true
                     } else {
                         micButton?.isSelected = false
-                        if (statusText?.text?.contains("ثبت") != true) {
-                            statusText?.text = if (languageFa) "آماده — آفلاین" else "Ready — offline"
-                        }
                     }
                 }
             }
         })
 
-        Thread {
-            VoskEngine.startListening(
-                applicationContext,
-                if (languageFa) "fa" else "en"
-            )
-        }.start()
+        Thread({
+            try {
+                VoskEngine.startListening(
+                    applicationContext,
+                    if (languageFa) "fa" else "en"
+                )
+            } catch (t: Throwable) {
+                mainHandler.post {
+                    statusText?.text = "خطا: ${t.message}"
+                }
+            }
+        }, "ime-vosk").start()
     }
 
     private fun stopListening() {
-        Thread { VoskEngine.stopListening() }.start()
-        statusText?.text = if (languageFa) "آماده — آفلاین" else "Ready — offline"
+        try {
+            VoskEngine.stopListening()
+        } catch (_: Throwable) {
+        }
+        statusText?.text =
+            if (languageFa) "آماده — آفلاین" else "Ready — offline"
         micButton?.isSelected = false
     }
 
     override fun onDestroy() {
         try {
             VoskEngine.stopListening()
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
         }
         super.onDestroy()
     }
