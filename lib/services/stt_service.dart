@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'model_downloader.dart';
 
 enum SttLanguage { persian, english }
 
 enum SttState { idle, initializing, listening, processing, error }
 
-/// تشخیص گفتار آفلاین از طریق MethodChannel و موتور بومی Vosk
 class SttService extends ChangeNotifier {
   static const _method = MethodChannel('offline_voice_typing/vosk');
   static const _events = EventChannel('offline_voice_typing/vosk_events');
@@ -20,7 +18,6 @@ class SttService extends ChangeNotifier {
   bool _modelReady = false;
   bool _initInProgress = false;
   StreamSubscription? _eventSub;
-  ModelDownloader? _downloader;
 
   SttState get state => _state;
   SttLanguage get language => _language;
@@ -30,10 +27,6 @@ class SttService extends ChangeNotifier {
   bool get isListening => _state == SttState.listening;
   bool get modelReady => _modelReady;
   String get langCode => _language == SttLanguage.persian ? 'fa' : 'en';
-
-  void attachDownloader(ModelDownloader downloader) {
-    _downloader = downloader;
-  }
 
   void setLanguage(SttLanguage lang) {
     if (_language != lang) {
@@ -55,7 +48,8 @@ class SttService extends ChangeNotifier {
           notifyListeners();
         case 'final':
           if (text.trim().isNotEmpty) {
-            _finalText = _finalText.isEmpty ? text.trim() : '$_finalText ${text.trim()}';
+            _finalText =
+                _finalText.isEmpty ? text.trim() : '$_finalText ${text.trim()}';
           }
           _partialText = '';
           notifyListeners();
@@ -66,8 +60,10 @@ class SttService extends ChangeNotifier {
         case 'status':
           if (text == 'listening') {
             _state = SttState.listening;
-          } else if (text == 'idle' && _state == SttState.listening) {
-            _state = SttState.idle;
+          } else if (text == 'idle') {
+            if (_state == SttState.listening || _state == SttState.processing) {
+              _state = SttState.idle;
+            }
           }
           notifyListeners();
       }
@@ -87,19 +83,10 @@ class SttService extends ChangeNotifier {
 
     try {
       await _ensureEventListen();
-
-      // استخراج مدل از سمت Dart (اختیاری) + آماده‌سازی native
-      try {
-        await _downloader?.ensureModel(langCode);
-      } catch (e) {
-        debugPrint('Dart model extract: $e');
-      }
-
       final ok = await _method.invokeMethod<bool>('prepare', {'lang': langCode});
       if (ok != true) {
         throw Exception('آماده‌سازی موتور آفلاین ناموفق بود');
       }
-
       _modelReady = true;
       _state = SttState.idle;
       notifyListeners();
@@ -118,18 +105,9 @@ class SttService extends ChangeNotifier {
     if (_state == SttState.listening) return;
     try {
       await _ensureEventListen();
-      if (!_modelReady) {
-        await ensureEngineReady();
-      }
-      if (!_modelReady) {
-        throw Exception(_errorMessage ?? 'موتور آماده نیست');
-      }
-
       _partialText = '';
       _errorMessage = null;
       await _method.invokeMethod('start', {'lang': langCode});
-      _state = SttState.listening;
-      notifyListeners();
     } catch (e) {
       _errorMessage = e.toString();
       _state = SttState.error;
@@ -157,14 +135,17 @@ class SttService extends ChangeNotifier {
     }
   }
 
+  Future<void> showImePicker() async {
+    try {
+      await _method.invokeMethod('showImePicker');
+    } catch (e) {
+      debugPrint('IME picker: $e');
+    }
+  }
+
   void clearText() {
     _partialText = '';
     _finalText = '';
-    notifyListeners();
-  }
-
-  void setFinalText(String text) {
-    _finalText = text;
     notifyListeners();
   }
 
