@@ -17,7 +17,6 @@ import java.util.zip.ZipInputStream
 
 /**
  * موتور تشخیص گفتار آفلاین با Vosk بومی.
- * هم از اپ Flutter و هم از IME استفاده می‌شود.
  */
 object VoskEngine {
     private const val TAG = "VoskEngine"
@@ -33,7 +32,7 @@ object VoskEngine {
     @Volatile
     var currentLang: String = "fa"
 
-    fun interface Listener {
+    interface Listener {
         fun onPartial(text: String)
         fun onFinal(text: String)
         fun onError(message: String)
@@ -65,13 +64,11 @@ object VoskEngine {
                 return outDir.absolutePath
             }
 
-            // پاکسازی ناقص
             if (outDir.exists()) {
                 outDir.deleteRecursively()
             }
             outDir.parentFile?.mkdirs()
 
-            // استخراج از assets (مسیر flutter: flutter_assets/assets/models/...)
             val assetPaths = listOf(
                 "flutter_assets/assets/$assetZip",
                 "assets/$assetZip",
@@ -116,8 +113,7 @@ object VoskEngine {
                 return null
             }
 
-            // پیدا کردن مسیر واقعی مدل
-            val found = findModelRoot(File(context.filesDir, "vosk_models"))
+            val found = findModelRoot(File(context.filesDir, "vosk_models"), folder)
             if (found != null) {
                 Log.i(TAG, "Model ready at $found")
                 return found
@@ -132,7 +128,9 @@ object VoskEngine {
         }
     }
 
-    private fun findModelRoot(base: File): String? {
+    private fun findModelRoot(base: File, preferredFolder: String): String? {
+        val preferred = File(base, preferredFolder)
+        if (File(preferred, "am/final.mdl").exists()) return preferred.absolutePath
         if (!base.exists()) return null
         val queue = ArrayDeque<File>()
         queue.add(base)
@@ -219,8 +217,7 @@ object VoskEngine {
                     if (read > 0) {
                         val rec = recognizer ?: break
                         if (rec.acceptWaveForm(buf, read)) {
-                            val result = rec.result
-                            val text = extractText(result, "text")
+                            val text = extractText(rec.result, "text")
                             if (text.isNotBlank()) {
                                 listener?.onFinal(text)
                             }
@@ -232,10 +229,8 @@ object VoskEngine {
                         }
                     }
                 }
-                // نتیجه نهایی
                 try {
-                    val finalJson = recognizer?.finalResult
-                    val text = extractText(finalJson, "text")
+                    val text = extractText(recognizer?.finalResult, "text")
                     if (text.isNotBlank()) {
                         listener?.onFinal(text)
                     }
