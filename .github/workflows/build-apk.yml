@@ -33,7 +33,7 @@ jobs:
           cp /tmp/backup/README.md . 2>/dev/null || true
           cp -r /tmp/backup/android_ime . 2>/dev/null || true
 
-      - name: Inject native code and permissions
+      - name: Inject native code, permissions, gradle
         run: |
           set -e
           PKG=android/app/src/main/kotlin/com/offlinevoicetyping/offline_voice_typing
@@ -55,6 +55,12 @@ jobs:
                   '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <application',
                   1,
               )
+          if 'android:largeHeap' not in text:
+              text = text.replace(
+                  "<application",
+                  '<application android:largeHeap="true" android:extractNativeLibs="true" ',
+                  1,
+              )
           if "VoiceTypingIME" not in text:
               service = '''
                   <service
@@ -73,42 +79,103 @@ jobs:
               text = text.replace("</application>", service + "\n    </application>")
           mpath.write_text(text)
 
-          # Support both Groovy and Kotlin DSL gradle files
           for name in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
               gpath = Path(name)
               if not gpath.exists():
                   continue
               g = gpath.read_text()
-              if "vosk-android" in g:
-                  print(f"already has vosk in {name}")
-                  continue
-              if name.endswith(".kts"):
-                  needle = "dependencies {"
-                  insert = 'dependencies {\n    implementation("com.alphacephei:vosk-android:0.3.70")'
-                  if needle in g:
-                      g = g.replace(needle, insert, 1)
+              if "vosk-android" not in g:
+                  if name.endswith(".kts"):
+                      g = g.replace(
+                          "dependencies {",
+                          'dependencies {\n    implementation("com.alphacephei:vosk-android:0.3.70")',
+                          1,
+                      )
                   else:
-                      g += '\ndependencies {\n    implementation("com.alphacephei:vosk-android:0.3.70")\n}\n'
-              else:
-                  needle = "dependencies {"
-                  insert = 'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"'
-                  if needle in g:
-                      g = g.replace(needle, insert, 1)
+                      g = g.replace(
+                          "dependencies {",
+                          'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"',
+                          1,
+                      )
+              if "useLegacyPackaging" not in g:
+                  extra = '''
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+    ndk {
+        abiFilters.clear()
+        abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+    }
+'''
+                  if name.endswith(".kts"):
+                      g = g.replace("android {", "android {" + extra, 1)
                   else:
-                      g += '\ndependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"\n}\n'
+                      g = g.replace(
+                          "android {",
+                          'android {\n    packagingOptions { jniLibs { useLegacyPackaging true } }\n',
+                          1,
+                      )
               gpath.write_text(g)
-              print(f"Added vosk-android to {name}")
-              print(gpath.read_text()[-800:])
+              print("Updated", name)
           PY
 
-      - name: Download Vosk models
+      - name: Download official Vosk models into Android assets
         run: |
-          mkdir -p assets/models
-          curl -L --retry 5 -o assets/models/vosk-model-small-fa-0.42.zip \
-            https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip
-          curl -L --retry 5 -o assets/models/vosk-model-small-en-us-0.15.zip \
-            https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip
-          ls -lh assets/models/
+          set -e
+          download_model() {
+            local name="$1"
+            shift
+            local out="/tmp/${name}.zip"
+            local ok=0
+            for url in "$@"; do
+              echo "Trying $url"
+              if curl -fL --retry 4 --retry-delay 3 -o "$out" "$url"; then
+                sz=$(stat -c%s "$out")
+                echo "Downloaded $sz bytes"
+                if [ "$sz" -gt 5000000 ] && unzip -t "$out" >/dev/null 2>&1; then
+                  ok=1
+                  break
+                fi
+              fi
+            done
+            if [ "$ok" != "1" ]; then
+              echo "Failed to download $name"
+              exit 1
+            fi
+            local unpack="/tmp/unpack-$name"
+            rm -rf "$unpack"
+            mkdir -p "$unpack"
+            unzip -q "$out" -d "$unpack"
+            local mdl
+            mdl=$(find "$unpack" -path '*/am/final.mdl' | head -1)
+            if [ -z "$mdl" ]; then
+              echo "final.mdl missing"
+              find "$unpack" | head -50
+              exit 1
+            fi
+            local root
+            root=$(dirname "$(dirname "$mdl")")
+            local dest="android/app/src/main/assets/$name"
+            rm -rf "$dest"
+            mkdir -p "$dest"
+            cp -a "$root"/. "$dest/"
+            echo "asset-$name" > "$dest/uuid"
+            test -f "$dest/am/final.mdl"
+            echo "Unpacked $name OK"
+            du -sh "$dest"
+          }
+
+          download_model model-fa \
+            "https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip" \
+            "https://huggingface.co/grimso/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip" \
+            "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip"
+
+          download_model model-en \
+            "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip" \
+            "https://huggingface.co/grimso/vosk-models/resolve/main/vosk-model-small-en-us-0.15.zip" \
+            "https://huggingface.co/CrispyPancake/vosk-model-small-en-us-0.15/resolve/main/vosk-model-small-en-us-0.15.zip"
 
       - name: Flutter pub get
         run: flutter pub get

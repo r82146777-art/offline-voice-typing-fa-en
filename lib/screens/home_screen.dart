@@ -7,7 +7,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
 
 import '../services/stt_service.dart';
-import '../services/model_downloader.dart';
 import '../widgets/big_mic_button.dart';
 import 'help_screen.dart';
 import 'about_screen.dart';
@@ -19,7 +18,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _textController = TextEditingController();
   bool _dontShowInviteAgain = false;
   bool _bootstrapping = false;
@@ -28,36 +27,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final downloader = context.read<ModelDownloader>();
-      final stt = context.read<SttService>();
-      stt.attachDownloader(downloader);
-
-      setState(() => _bootstrapping = true);
-      try {
-        await downloader.ensureModel(stt.langCode);
-      } catch (e) {
-        debugPrint('Background model prep: $e');
-      }
-      if (mounted) setState(() => _bootstrapping = false);
-
-      await _maybeShowInviteDialog();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeShowInviteDialog();
     });
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _textController.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      debugPrint('App resumed');
-    }
   }
 
   Future<void> _maybeShowInviteDialog() async {
@@ -123,8 +101,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _showLanguagePicker() async {
     final stt = context.read<SttService>();
-    final downloader = context.read<ModelDownloader>();
-
     final selected = await showModalBottomSheet<SttLanguage>(
       context: context,
       showDragHandle: true,
@@ -133,7 +109,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisSize: MainAxisSize.min,
           children: [
             const ListTile(
-              title: Text('انتخاب زبان', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: Text('انتخاب زبان',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
             ListTile(
               title: const Text('فارسی (آفلاین)'),
@@ -154,19 +131,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
     );
-
     if (selected != null && selected != stt.language) {
       stt.setLanguage(selected);
-      if (!mounted) return;
-      setState(() => _bootstrapping = true);
-      try {
-        await downloader.ensureModel(
-          selected == SttLanguage.persian ? 'fa' : 'en',
-        );
-      } catch (e) {
-        debugPrint('Lang switch model: $e');
-      }
-      if (mounted) setState(() => _bootstrapping = false);
     }
   }
 
@@ -183,9 +149,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _pickIme() async {
+    await context.read<SttService>().showImePicker();
+  }
+
   Future<void> _onMicPressed() async {
     final stt = context.read<SttService>();
-
     try {
       var status = await Permission.microphone.status;
       if (!status.isGranted) {
@@ -206,31 +175,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-
       if (stt.isListening) {
         await stt.stopListening();
-      } else {
-        if (mounted) setState(() => _bootstrapping = true);
-        await stt.ensureEngineReady();
-        if (mounted) setState(() => _bootstrapping = false);
-
-        if (stt.state == SttState.error) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  stt.errorMessage ?? 'خطا در آماده‌سازی موتور آفلاین',
-                ),
-              ),
-            );
-          }
-          return;
-        }
-        await stt.startListening();
+        return;
       }
+
+      if (mounted) setState(() => _bootstrapping = true);
+      await stt.ensureEngineReady();
+      if (mounted) setState(() => _bootstrapping = false);
+
+      if (stt.state == SttState.error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(stt.errorMessage ?? 'خطا در موتور آفلاین'),
+            ),
+          );
+        }
+        return;
+      }
+      await stt.startListening();
     } catch (e) {
-      debugPrint('Mic press error: $e');
       if (mounted) {
         setState(() => _bootstrapping = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -243,7 +208,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final stt = context.watch<SttService>();
-    final downloader = context.watch<ModelDownloader>();
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -264,9 +228,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     }
 
-    final preparing = _bootstrapping ||
-        downloader.status == DownloadStatus.extracting ||
-        stt.state == SttState.initializing;
+    final preparing =
+        _bootstrapping || stt.state == SttState.initializing;
 
     return Scaffold(
       appBar: AppBar(
@@ -288,6 +251,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   await _showLanguagePicker();
                 case 'ime':
                   await _openImeSettings();
+                case 'picker':
+                  await _pickIme();
                 case 'help':
                   if (mounted) {
                     Navigator.push(
@@ -306,7 +271,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'language', child: Text('زبان')),
-              PopupMenuItem(value: 'ime', child: Text('کیبورد سیستم')),
+              PopupMenuItem(value: 'ime', child: Text('فعال‌سازی کیبورد')),
+              PopupMenuItem(value: 'picker', child: Text('انتخاب کیبورد')),
               PopupMenuItem(value: 'help', child: Text('راهنما')),
               PopupMenuItem(value: 'about', child: Text('درباره ما')),
             ],
@@ -349,15 +315,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (preparing) ...[
                 const LinearProgressIndicator(),
                 const SizedBox(height: 8),
-                Text(
-                  downloader.status == DownloadStatus.extracting
-                      ? 'در حال آماده‌سازی مدل آفلاین...'
-                      : 'در حال آماده‌سازی موتور...',
-                ),
+                const Text('در حال آماده‌سازی موتور آفلاین... لطفاً صبر کنید'),
                 const SizedBox(height: 12),
               ],
-              if (downloader.status == DownloadStatus.error ||
-                  (stt.state == SttState.error && stt.errorMessage != null)) ...[
+              if (stt.state == SttState.error && stt.errorMessage != null) ...[
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -366,27 +327,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     color: colorScheme.errorContainer.withOpacity(0.4),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Column(
-                    children: [
-                      Text(
-                        downloader.errorMessage ?? stt.errorMessage ?? 'خطا',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      FilledButton(
-                        onPressed: () async {
-                          setState(() => _bootstrapping = true);
-                          try {
-                            await downloader.retryCurrent();
-                            await stt.ensureEngineReady();
-                          } catch (e) {
-                            debugPrint('Retry: $e');
-                          }
-                          if (mounted) setState(() => _bootstrapping = false);
-                        },
-                        child: const Text('تلاش مجدد'),
-                      ),
-                    ],
+                  child: Text(
+                    stt.errorMessage ?? 'خطا',
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ],
@@ -438,14 +381,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 onPressed: _onMicPressed,
               ).animate().scale(duration: 350.ms, curve: Curves.easeOutBack),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
+              FilledButton.icon(
                 onPressed: _openImeSettings,
                 icon: const Icon(Icons.keyboard),
-                label: const Text('فعال‌سازی کیبورد سیستم'),
+                label: const Text('1) فعال‌سازی کیبورد Offline Voice Typing'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _pickIme,
+                icon: const Icon(Icons.swap_horiz),
+                label: const Text('2) انتخاب همین کیبورد آفلاین'),
               ),
               const SizedBox(height: 8),
               Text(
-                'مدل‌ها داخل اپ هستند — نیازی به اینترنت نیست.\nمجوز میکروفون فقط هنگام ضبط خواسته می‌شود.',
+                'اگر هنوز آنلاین است، کیبورد گوگل فعال است. با دکمه 2 کیبورد آفلاین را انتخاب کنید.\nاینترنت لازم نیست.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurface.withOpacity(0.7),
                 ),
