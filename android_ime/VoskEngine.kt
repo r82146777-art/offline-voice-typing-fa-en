@@ -17,8 +17,9 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Offline Vosk using official SpeechService. Only one language model is loaded.
- * All native/Error failures are caught so the process does not die.
+ * Offline Vosk engine for Persian and English.
+ * Only final recognition segments are committed to the editor. Partial
+ * hypotheses are display-only, which prevents truncated/duplicated words.
  */
 object VoskEngine {
     private const val TAG = "VoskEngine"
@@ -41,20 +42,15 @@ object VoskEngine {
         fun onStatus(status: String)
     }
 
-    @Volatile
-    private var listener: Listener? = null
+    @Volatile private var listener: Listener? = null
 
-    fun setListener(l: Listener?) {
-        listener = l
-    }
-
+    fun setListener(l: Listener?) { listener = l }
     fun isListening(): Boolean = listening.get()
 
     @Synchronized
     fun prepare(context: Context, lang: String): Boolean {
         if (model != null && loadedLang == lang) return true
         if (!preparing.compareAndSet(false, true)) {
-            // another prepare in flight
             var spins = 0
             while (preparing.get() && spins < 200) {
                 try { Thread.sleep(100) } catch (_: InterruptedException) {}
@@ -63,66 +59,40 @@ object VoskEngine {
             return model != null && loadedLang == lang
         }
         try {
-            try {
-                LibVosk.setLogLevel(LogLevel.WARNINGS)
-            } catch (t: Throwable) {
-                Log.e(TAG, "LibVosk init failed", t)
+            try { LibVosk.setLogLevel(LogLevel.WARNINGS) } catch (t: Throwable) {
                 postError("کتابخانه آفلاین لود نشد: ${t.javaClass.simpleName}")
                 return false
             }
-
             stopInternal()
             closeModel()
-
             currentLang = lang
             val assetDir = if (lang == "en") "model-en" else "model-fa"
-            val path = try {
-                unpackAssetModel(context, assetDir)
-            } catch (t: Throwable) {
-                Log.e(TAG, "unpack failed", t)
-                postError("استخراج مدل ناموفق: ${t.message}")
-                return false
-            }
-
+            val path = unpackAssetModel(context, assetDir)
             val conf = File(path, "conf/model.conf")
             val mdl = File(path, "am/final.mdl")
             if (!conf.exists() && !mdl.exists()) {
                 postError("فایل مدل ناقص است")
                 return false
             }
-
-            model = try {
-                Model(path)
-            } catch (t: Throwable) {
-                Log.e(TAG, "Model() failed", t)
+            model = try { Model(path) } catch (t: Throwable) {
                 postError("بارگذاری مدل: ${t.javaClass.simpleName}: ${t.message}")
                 return false
             }
             loadedLang = lang
-            Log.i(TAG, "Model ready for $lang at $path")
             return true
         } catch (t: Throwable) {
             Log.e(TAG, "prepare failed", t)
             postError("آماده‌سازی: ${t.javaClass.simpleName}: ${t.message}")
             closeModel()
             return false
-        } finally {
-            preparing.set(false)
-        }
+        } finally { preparing.set(false) }
     }
 
     fun startListening(context: Context, lang: String = currentLang) {
         if (listening.get()) return
         try {
             if (!prepare(context, lang)) return
-
-            val m = model
-            if (m == null) {
-                postError("مدل آماده نیست")
-                return
-            }
-
-            // SpeechService must be started on main thread
+            val m = model ?: run { postError("مدل آماده نیست"); return }
             mainHandler.post {
                 try {
                     stopInternal()
@@ -136,10 +106,9 @@ object VoskEngine {
                             if (t.isNotBlank()) listener?.onPartial(t)
                         }
 
-                        override fun onResult(hypothesis: String?) {
-                            val t = extractText(hypothesis, "text")
-                            if (t.isNotBlank()) listener?.onFinal(t)
-                        }
+                        // Do not commit onResult: SpeechService may emit intermediate
+                        // result callbacks before the segment is complete.
+                        override fun onResult(hypothesis: String?) = Unit
 
                         override fun onFinalResult(hypothesis: String?) {
                             val t = extractText(hypothesis, "text")
@@ -162,83 +131,56 @@ object VoskEngine {
                     if (ok) {
                         listening.set(true)
                         listener?.onStatus("listening")
-                    } else {
-                        listening.set(false)
-                        postError("میکروفون در دسترس نیست")
-                    }
+                    } else postError("میکروفون در دسترس نیست")
                 } catch (t: Throwable) {
                     listening.set(false)
-                    Log.e(TAG, "startListening main", t)
                     postError("${t.javaClass.simpleName}: ${t.message}")
                 }
             }
         } catch (t: Throwable) {
             listening.set(false)
-            Log.e(TAG, "startListening", t)
             postError("${t.javaClass.simpleName}: ${t.message}")
         }
     }
 
     fun stopListening() {
         mainHandler.post {
-            try {
-                stopInternal()
-            } catch (t: Throwable) {
-                Log.e(TAG, "stop", t)
-            } finally {
-                listening.set(false)
-                listener?.onStatus("idle")
-            }
+            try { speechService?.stop() } catch (_: Throwable) {}
+            try { speechService?.shutdown() } catch (_: Throwable) {}
+            speechService = null
+            try { recognizer?.close() } catch (_: Throwable) {}
+            recognizer = null
+            listening.set(false)
+            listener?.onStatus("idle")
         }
     }
 
     private fun stopInternal() {
-        try {
-            speechService?.stop()
-        } catch (_: Throwable) {
-        }
-        try {
-            speechService?.shutdown()
-        } catch (_: Throwable) {
-        }
+        try { speechService?.stop() } catch (_: Throwable) {}
+        try { speechService?.shutdown() } catch (_: Throwable) {}
         speechService = null
-        try {
-            recognizer?.close()
-        } catch (_: Throwable) {
-        }
+        try { recognizer?.close() } catch (_: Throwable) {}
         recognizer = null
         listening.set(false)
     }
 
     private fun closeModel() {
-        try {
-            model?.close()
-        } catch (_: Throwable) {
-        }
+        try { model?.close() } catch (_: Throwable) {}
         model = null
         loadedLang = null
     }
 
-    private fun postError(msg: String) {
-        mainHandler.post { listener?.onError(msg) }
-    }
+    private fun postError(msg: String) { mainHandler.post { listener?.onError(msg) } }
 
     private fun unpackAssetModel(context: Context, assetDir: String): String {
         val dest = File(context.filesDir, "vosk/$assetDir")
         val ready = File(dest, ".ready")
         val conf = File(dest, "conf/model.conf")
         val mdl = File(dest, "am/final.mdl")
-        if (ready.exists() && (conf.exists() || mdl.exists())) {
-            return dest.absolutePath
-        }
-        if (dest.exists()) {
-            dest.deleteRecursively()
-        }
+        if (ready.exists() && (conf.exists() || mdl.exists())) return dest.absolutePath
+        if (dest.exists()) dest.deleteRecursively()
         dest.mkdirs()
-        val listed = context.assets.list(assetDir)
-        if (listed.isNullOrEmpty()) {
-            throw IOException("Asset folder missing: $assetDir")
-        }
+        if (context.assets.list(assetDir).isNullOrEmpty()) throw IOException("Asset folder missing: $assetDir")
         copyAssetFolder(context, assetDir, dest)
         if (!File(dest, "conf/model.conf").exists() && !File(dest, "am/final.mdl").exists()) {
             throw IOException("Unpacked model is incomplete")
@@ -255,22 +197,14 @@ object VoskEngine {
             val children = context.assets.list(path)
             if (children.isNullOrEmpty()) {
                 context.assets.open(path).use { input ->
-                    FileOutputStream(File(dest, name)).use { output ->
-                        input.copyTo(output)
-                    }
+                    FileOutputStream(File(dest, name)).use { output -> input.copyTo(output) }
                 }
-            } else {
-                copyAssetFolder(context, path, File(dest, name))
-            }
+            } else copyAssetFolder(context, path, File(dest, name))
         }
     }
 
     private fun extractText(json: String?, key: String): String {
         if (json.isNullOrBlank()) return ""
-        return try {
-            JSONObject(json).optString(key, "").trim()
-        } catch (_: Exception) {
-            ""
-        }
+        return try { JSONObject(json).optString(key, "").trim() } catch (_: Exception) { "" }
     }
 }
