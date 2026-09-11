@@ -63,21 +63,27 @@ jobs:
               text = text.replace("</application>", service + "\n    </application>")
           mpath.write_text(text)
 
-          for name in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
-              p = Path(name)
-              if not p.exists(): continue
-              g = p.read_text()
-              if "vosk-android" not in g:
-                  if name.endswith(".kts"):
-                      g = g.replace("dependencies {", 'dependencies {\n    implementation("com.alphacephei:vosk-android:0.3.70")', 1)
-                  else:
-                      g = g.replace("dependencies {", 'dependencies {\n    implementation "com.alphacephei:vosk-android:0.3.70"', 1)
+          p = Path("android/app/build.gradle")
+          if not p.exists():
+              p = Path("android/app/build.gradle.kts")
+          g = p.read_text()
+          if "mavenCentral()" not in g:
+              g = g.replace("repositories {", "repositories {\n    mavenCentral()", 1)
+          if p.suffix == ".kts":
+              dep = '    implementation("com.alphacephei:vosk-android:0.3.47@aar")\n    implementation("net.java.dev.jna:jna:5.13.0@aar")\n'
+              if "com.alphacephei:vosk-android" not in g:
+                  g = g.replace("dependencies {", "dependencies {\n" + dep, 1)
               if "useLegacyPackaging" not in g:
-                  if name.endswith(".kts"):
-                      g = g.replace("android {", "android {\n    packaging { jniLibs { useLegacyPackaging = true } }", 1)
-                  else:
-                      g = g.replace("android {", "android {\n    packagingOptions { jniLibs { useLegacyPackaging true } }", 1)
-              p.write_text(g)
+                  g = g.replace("android {", "android {\n    packaging { jniLibs { useLegacyPackaging = true } }", 1)
+          else:
+              dep = '    implementation "com.alphacephei:vosk-android:0.3.47@aar"\n    implementation "net.java.dev.jna:jna:5.13.0@aar"\n'
+              if "com.alphacephei:vosk-android" not in g:
+                  g = g.replace("dependencies {", "dependencies {\n" + dep, 1)
+              if "useLegacyPackaging" not in g:
+                  g = g.replace("android {", "android {\n    packagingOptions { jniLibs { useLegacyPackaging true } }", 1)
+          p.write_text(g)
+          print("Configured Vosk Android dependency in", p)
+          print(g)
           PY
 
       - name: Download official Vosk models
@@ -105,22 +111,20 @@ jobs:
             test -f "$dest/am/final.mdl"
             du -sh "$dest"
           }
-
-          # Keep the mobile-friendly Persian model: the official Vosk catalogue
-          # reports it as the mobile model; the 1.6 GB Persian model is intended
-          # for server-class memory and is not suitable for typical Android phones.
           download_model model-fa \
             "https://alphacephei.com/vosk/models/vosk-model-small-fa-0.42.zip" \
             "https://huggingface.co/grimso/vosk-models/resolve/main/vosk-model-small-fa-0.42.zip"
-
-          # Use the larger English lgraph model: it is still far smaller than
-          # the 1.8 GB full model and has a better reported error rate than the
-          # 40 MB mobile model, while remaining much more realistic on Android.
           download_model model-en \
             "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
 
       - name: Flutter pub get
         run: flutter pub get
+
+      - name: Verify Vosk dependency resolution
+        run: |
+          set -e
+          cd android
+          ./gradlew :app:dependencies --configuration releaseCompileClasspath | grep -E "vosk-android|jna" | head -30
 
       - name: Build release APK
         run: flutter build apk --release
