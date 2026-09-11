@@ -47,6 +47,7 @@ jobs:
 
           python3 <<'PY'
           from pathlib import Path
+
           mpath = Path("android/app/src/main/AndroidManifest.xml")
           text = mpath.read_text()
           if "RECORD_AUDIO" not in text:
@@ -67,23 +68,40 @@ jobs:
           if not p.exists():
               p = Path("android/app/build.gradle.kts")
           g = p.read_text()
-          if "mavenCentral()" not in g:
-              g = g.replace("repositories {", "repositories {\n    mavenCentral()", 1)
+
+          # Flutter's generated project may have no repositories/dependencies blocks.
+          # Put Maven Central in settings.gradle and inject explicit app dependencies.
+          settings = Path("android/settings.gradle")
+          s = settings.read_text()
+          if "mavenCentral()" not in s:
+              s = s.replace("repositories {", "repositories {\n        mavenCentral()", 1)
+          settings.write_text(s)
+
           if p.suffix == ".kts":
-              dep = '    implementation("com.alphacephei:vosk-android:0.3.47@aar")\n    implementation("net.java.dev.jna:jna:5.13.0@aar")\n'
+              dep_block = '''\ndependencies {\n    implementation("com.alphacephei:vosk-android:0.3.75@aar")\n    implementation("net.java.dev.jna:jna:5.18.1@aar")\n}\n'''
               if "com.alphacephei:vosk-android" not in g:
-                  g = g.replace("dependencies {", "dependencies {\n" + dep, 1)
+                  marker = '\nflutter {'
+                  if marker in g:
+                      g = g.replace(marker, dep_block + marker, 1)
+                  else:
+                      g += dep_block
               if "useLegacyPackaging" not in g:
                   g = g.replace("android {", "android {\n    packaging { jniLibs { useLegacyPackaging = true } }", 1)
           else:
-              dep = '    implementation "com.alphacephei:vosk-android:0.3.47@aar"\n    implementation "net.java.dev.jna:jna:5.13.0@aar"\n'
+              dep_block = '''\ndependencies {\n    implementation "com.alphacephei:vosk-android:0.3.75@aar"\n    implementation "net.java.dev.jna:jna:5.18.1@aar"\n}\n'''
               if "com.alphacephei:vosk-android" not in g:
-                  g = g.replace("dependencies {", "dependencies {\n" + dep, 1)
+                  marker = '\nflutter {'
+                  if marker in g:
+                      g = g.replace(marker, dep_block + marker, 1)
+                  else:
+                      g += dep_block
               if "useLegacyPackaging" not in g:
                   g = g.replace("android {", "android {\n    packagingOptions { jniLibs { useLegacyPackaging true } }", 1)
           p.write_text(g)
-          print("Configured Vosk Android dependency in", p)
+          print("Configured", p)
           print(g)
+          print(settings)
+          print(s)
           PY
 
       - name: Download official Vosk models
@@ -122,9 +140,11 @@ jobs:
 
       - name: Verify Vosk dependency resolution
         run: |
-          set -e
+          set -euo pipefail
           cd android
-          ./gradlew :app:dependencies --configuration releaseCompileClasspath | grep -E "vosk-android|jna" | head -30
+          ./gradlew :app:dependencies --configuration releaseCompileClasspath > /tmp/deps.txt
+          grep -E "com\.alphacephei:vosk-android|net\.java\.dev\.jna:jna" /tmp/deps.txt
+          echo "Vosk/JNA dependencies resolved successfully."
 
       - name: Build release APK
         run: flutter build apk --release
