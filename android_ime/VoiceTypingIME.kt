@@ -2,6 +2,10 @@ package com.offlinevoicetyping.offline_voice_typing
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
+import android.content.ClipboardManager
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
@@ -21,6 +25,7 @@ class VoiceTypingIME : InputMethodService() {
     private var micButton: ImageButton? = null
     private var languageFa = true
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var textToSpeech: TextToSpeech? = null
 
     override fun onCreateInputView(): View {
         val view = layoutInflater.inflate(R.layout.ime_keyboard, null)
@@ -31,6 +36,8 @@ class VoiceTypingIME : InputMethodService() {
         val btnEnter = view.findViewById<Button>(R.id.ime_enter)
         val btnLang = view.findViewById<Button>(R.id.ime_lang)
         val btnSettings = view.findViewById<Button>(R.id.ime_settings)
+        val btnSwitchKeyboard = view.findViewById<Button>(R.id.ime_switch_keyboard)
+        val btnReadClipboard = view.findViewById<Button>(R.id.ime_read_clipboard)
 
         micButton?.setOnClickListener { toggleListening() }
         btnSpace?.setOnClickListener { currentInputConnection?.commitText(" ", 1) }
@@ -52,6 +59,16 @@ class VoiceTypingIME : InputMethodService() {
                 if (languageFa) "فارسی آفلاین — میکروفون را بزنید"
                 else "English offline — tap mic"
         }
+        btnSwitchKeyboard?.setOnClickListener {
+            try {
+                if (!switchToNextInputMethod(false)) {
+                    statusText?.text = "کیبورد دیگری در دسترس نیست؛ از تنظیمات گوشی کیبوردها را فعال کنید"
+                }
+            } catch (_: Throwable) {
+                statusText?.text = "برای تغییر کیبورد از دکمه تغییر ورودی گوشی استفاده کنید"
+            }
+        }
+        btnReadClipboard?.setOnClickListener { readClipboardAloud() }
         btnSettings?.setOnClickListener {
             try {
                 val i = Intent(this, MainActivity::class.java)
@@ -63,6 +80,41 @@ class VoiceTypingIME : InputMethodService() {
 
         statusText?.text = "کیبورد آفلاین — میکروفون را بزنید"
         return view
+    }
+
+    private fun readClipboardAloud() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
+        if (text.isBlank()) {
+            statusText?.text = "ابتدا متن را کپی کنید؛ سپس بلندخوانی را بزنید"
+            return
+        }
+        if (textToSpeech == null) {
+            textToSpeech = TextToSpeech(this) { result ->
+                if (result == TextToSpeech.SUCCESS) speakClipboard(text)
+                else statusText?.text = "موتور گفتار گوشی در دسترس نیست"
+            }
+        } else {
+            speakClipboard(text)
+        }
+    }
+
+    private fun speakClipboard(text: String) {
+        val tts = textToSpeech ?: return
+        val persian = text.any { it in '\u0600'..'\u06FF' }
+        val locale = if (persian) Locale("fa", "IR") else Locale.US
+        val languageResult = tts.setLanguage(locale)
+        if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+            languageResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+            statusText?.text = if (persian)
+                "صدای فارسی نصب نیست؛ داده‌های گفتار فارسی را در تنظیمات گوشی نصب کنید"
+            else "صدای انگلیسی در موتور گفتار گوشی پشتیبانی نمی‌شود"
+            return
+        }
+        tts.setSpeechRate(0.92f)
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "offline-typing-clipboard")
+        statusText?.text = "در حال بلندخوانی متن کپی‌شده"
     }
 
     private fun toggleListening() {
@@ -158,6 +210,8 @@ class VoiceTypingIME : InputMethodService() {
             VoskEngine.stopListening()
         } catch (_: Throwable) {
         }
+        try { textToSpeech?.stop(); textToSpeech?.shutdown() } catch (_: Throwable) {}
+        textToSpeech = null
         super.onDestroy()
     }
 }
