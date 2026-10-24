@@ -55,6 +55,30 @@
         android:orientation="horizontal">
 
         <Button
+            android:id="@+id/ime_switch_keyboard"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="تغییر کیبورد"
+            android:contentDescription="رفتن به کیبورد بعدی نصب‌شده" />
+
+        <Button
+            android:id="@+id/ime_read_clipboard"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="بلندخوانی متن کپی‌شده"
+            android:contentDescription="خواندن متن کپی‌شده با صدای گوشی" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <Button
             android:id="@+id/ime_delete"
             android:layout_width="0dp"
             android:layout_height="48dp"
