@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:android_intent_plus/android_intent.dart';
 
 import '../services/stt_service.dart';
+import '../services/tts_service.dart';
+import 'read_aloud_screen.dart';
 import '../widgets/big_mic_button.dart';
 import 'help_screen.dart';
 import 'about_screen.dart';
@@ -253,6 +255,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _openImeSettings();
                 case 'picker':
                   await _pickIme();
+                case 'reader':
+                  if (mounted) {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ReadAloudScreen()));
+                  }
                 case 'help':
                   if (mounted) {
                     Navigator.push(
@@ -273,6 +279,7 @@ class _HomeScreenState extends State<HomeScreen> {
               PopupMenuItem(value: 'language', child: Text('زبان')),
               PopupMenuItem(value: 'ime', child: Text('فعال‌سازی کیبورد')),
               PopupMenuItem(value: 'picker', child: Text('انتخاب کیبورد')),
+              PopupMenuItem(value: 'reader', child: Text('بلندخوانی متن و فایل')),
               PopupMenuItem(value: 'help', child: Text('راهنما')),
               PopupMenuItem(value: 'about', child: Text('درباره ما')),
             ],
@@ -391,6 +398,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: _pickIme,
                 icon: const Icon(Icons.swap_horiz),
                 label: const Text('2) انتخاب همین کیبورد آفلاین'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReadAloudScreen())),
+                icon: const Icon(Icons.record_voice_over),
+                label: const Text('بلندخوانی متن فارسی و انگلیسی'),
               ),
               const SizedBox(height: 8),
               Text(
